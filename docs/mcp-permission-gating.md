@@ -3,7 +3,9 @@
 Status: architectural specification / investigation (exploration for #1383)  
 Scope: security architecture, MCP permission interception, high-risk operation catalog, declarative policy evaluation, plugin author guidelines, and implementation roadmap.  
 
-This specification is grounded in installed Paseo packages (`@getpaseo/protocol`, `@getpaseo/plugin`, `@getpaseo/server`, `@getpaseo/client`) and this repository (`packages/permission-audit`, `packages/mcp-gateway`, `plugins/mcp-tools`, `plugins/uppidi-fleet`, `plugins/x-comms`, `plugins/permission-logger`). Every claim is cited to exact codebase locations (`path:line`).
+This specification is grounded in installed Paseo packages (`@getpaseo/protocol`, `@getpaseo/plugin`, `@getpaseo/server`, `@getpaseo/client`) and this repository (`packages/permission-audit`, `packages/mcp-gateway`, `plugins/mcp-tools`, `plugins/uppidi-fleet`, `plugins/x-comms`). Every claim is cited to exact codebase locations (`path:line`).
+
+> **Note (post-#1493):** the `plugins/permission-logger` citations below were written while that plugin still existed. The functionality they describe now lives entirely in `packages/permission-audit` — the plugin was a thin wrapper over it — so the cited behaviour is unchanged, only the file paths moved.
 
 ---
 

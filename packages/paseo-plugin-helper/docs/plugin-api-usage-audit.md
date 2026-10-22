@@ -6,6 +6,9 @@
 > [#847](https://forge.mrs.uppidi.com/xpufx-org/paseo/issues/847) helper).
 > **Status:** docs-only audit. No code changed, so there are no tests to run. Every
 > claim below is a reading of source; nothing was executed against a running daemon.
+> **Post-#1493:** `plugins/worktree-install`, `plugins/permission-logger` and
+> `plugins/demo` were removed after this audit was written, so the rows that
+> name them are a record of the tree as it was, not a description of it today.
 
 This audit inventories the documented Paseo plugin reference surface, maps what the
 `plugins/*` suite actually uses, names the first concrete gap (typed theme colors), and

@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { pluginIds, manifestFor } from "./publish-npm.mjs";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
 const ROOT = new URL("..", import.meta.url).pathname;
@@ -11,8 +11,8 @@ const src = readFileSync(join(ROOT, "scripts", "npm-acquisition-smoke.mjs"), "ut
  * Regression for #623.
  *
  * The smoke kept its own hand-maintained array of eight plugins while
- * `pluginIds()` derives eleven, so `uppidi-fleet`, `wellbeing` and
- * `worktree-install` were published but never packed. `uppidi-fleet` is exactly
+ * `pluginIds()` derives the full set, so `uppidi-fleet` and `wellbeing` were
+ * published but never packed. `uppidi-fleet` is exactly
  * where the #621 leak survived: 33KB of `client/testing/` would have shipped
  * inside the tarball and nothing in CI assembled that tarball to notice.
  */
@@ -32,9 +32,26 @@ test("the smoke derives its plugin set instead of listing it", () => {
 
 test("every publishable plugin is covered", () => {
   // By construction today; asserted so a future filter or allowlist that
-  // narrows the set fails here rather than silently in production.
+  // narrows the set fails here rather than silently in production. The
+  // expected set is the plugin directories that carry a manifest and are not
+  // marked private, enumerated here rather than counted: a hardcoded number
+  // goes stale the moment a plugin is added or removed (#1493 removed three),
+  // and a stale number is a test that fails for the wrong reason.
   const covered = new Set(pluginIds());
-  assert.ok(covered.size >= 11, `expected the full publishable set, got ${covered.size}`);
+  const expected = readdirSync(join(ROOT, "plugins"), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && !entry.isSymbolicLink())
+    .map((entry) => entry.name)
+    .filter((name) => existsSync(join(ROOT, "plugins", name, "paseo-plugin.json")))
+    .filter((name) => {
+      try {
+        const pkg = JSON.parse(readFileSync(join(ROOT, "plugins", name, "package.json"), "utf8"));
+        return pkg.private !== true;
+      } catch {
+        return false;
+      }
+    })
+    .sort();
+  assert.deepEqual([...covered].sort(), expected);
 });
 
 test("the plugins the hardcoded array omitted are covered", () => {

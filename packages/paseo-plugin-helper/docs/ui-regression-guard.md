@@ -7,6 +7,9 @@
 > invariant fail in CI instead of in the operator's hand.
 > **Audience:** whoever implements the checklist in §6; reviewers deciding
 > whether the guard is sufficient.
+> **Post-#1493:** `plugins/worktree-install`, `plugins/permission-logger` and
+> `plugins/demo` were removed after this design was written, so the paths that
+> name them record the tree as it was.
 
 ---
 

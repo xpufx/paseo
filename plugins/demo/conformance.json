@@ -1,5 +1,0 @@
-{
-  "exempt": {
-    "no-bespoke-react-native-interactions": "client/host-ui.tsx is the plugin-local composition that replaces the removed paseo-plugin-helper/client kit (xpufx-org/paseo#937, #924). The host SDK ships no button/toggle/tab pressable primitive, so Button/Toggle/Tabs/Collapsible/AttentionBeacon compose Pressable over react-native. Every other helper/UI rule is followed; this is the single interaction seam."
-  }
-}

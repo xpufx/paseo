@@ -6,6 +6,9 @@
 > `paseo-plugin-ui-testing`).
 > **Status:** the shared render harness and its first census. This is a finding
 > report, not a claim that every surface is clean.
+> **Post-#1493:** `plugins/worktree-install`, `plugins/permission-logger` and
+> `plugins/demo` were removed after this census was taken, so the entries that
+> name them record the tree as it was.
 
 The census applies the harness to the surfaces the design doc names as
 known-risk, at a compact and a wide width, and records what fails. A green

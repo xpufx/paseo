@@ -391,9 +391,9 @@ export function evaluateHelperIdentity(pluginDir, repoRoot) {
     );
   }
 
-  // A plugin that resolves no helper at all has nothing to declare: #629's
-  // worktree-install exists precisely to prove the shared UI kit is not required,
-  // and its own test enforces the absence of any helper import.
+  // A plugin that resolves no helper at all has nothing to declare: the shared
+  // UI kit is not required for a plugin to build a surface, so "served from
+  // none" is a legitimate state rather than a missing declaration.
   if (observed.servedFrom !== "none") {
     if (!declared) {
       fail(`no declared helper expectation: add ${DECLARATION_FILE} or a pinned vendored README`);

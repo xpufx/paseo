@@ -231,9 +231,8 @@ export function manifestFor(id) {
   const entries = fs.readdirSync(dir);
   const missing = REQUIRED_FILES.filter((f) => !entries.includes(f));
   // Publish name derives from the plugin's identity in paseo-plugin.json, not
-  // the directory name: the two diverge (e.g. plugins/demo -> id
-  // "paseo-helper-demo"), and the npm package name must match the id the
-  // daemon installs by.
+  // the directory name: the two can diverge, and the npm package name must
+  // match the id the daemon installs by.
   let pluginId = id;
   try {
     const meta = JSON.parse(fs.readFileSync(path.join(dir, "paseo-plugin.json"), "utf8"));

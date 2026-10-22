@@ -42,7 +42,7 @@ build:
 
 ## stamp: Refresh plugin version stamps explicitly (typecheck/test no longer stamp)
 stamp:
-	@for p in demo top mcp-tools; do npm run stamp --prefix plugins/$$p; done
+	@for p in top mcp-tools; do npm run stamp --prefix plugins/$$p; done
 
 ## npm-stage: Stage all plugin tarballs (agent/CI uploads the artifact; no 2FA)
 npm-stage:

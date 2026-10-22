@@ -338,7 +338,7 @@ own the single scroll region.
 
 ## Interactive Showcase Demo
 
-Live Showcase coverage lives in the monorepo's `plugins/demo` conformance testbed (host-delegating `ui/` adapters, local composition, typed RPC actions, and persisted settings). The legacy `demo/` reference tree was removed.
+Live Showcase coverage used to live in the monorepo's `plugins/demo` conformance testbed (host-delegating `ui/` adapters, local composition, typed RPC actions, and persisted settings). The legacy `demo/` reference tree was removed, and the `plugins/demo` testbed itself was removed in #1493 along with the other deprecated plugins. The shared surface kit the testbed exercised now lives in `@xpufx/paseo-plugin-ui`.
 
 ## Documentation
 

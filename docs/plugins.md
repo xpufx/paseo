@@ -350,8 +350,8 @@ curl -fsS http://10.20.30.24:8099/frontdesk   # loopback fails on this host unle
 
 ### In this Repository (`xpufx/paseo`)
 - [`packages/paseo-plugin-helper/`](../packages/paseo-plugin-helper/README.md) — Shared helper library source and docs.
+- [`packages/paseo-plugin-ui/`](../packages/paseo-plugin-ui/) — Shared UI composition and design primitives.
 - [`plugins/top/`](../plugins/top/) — Reference live resource monitor plugin.
-- [`plugins/demo/`](../plugins/demo/) — Canonical conformance showcase testbed.
 - [`plugins/mcp-tools/`](../plugins/mcp-tools/) — MCP diagnostics and session probe plugin.
 
 ### Upstream Paseo Core (`getpaseo/paseo`)

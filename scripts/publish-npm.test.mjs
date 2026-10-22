@@ -56,7 +56,7 @@ check("--clean-stage selects clean mode", parseArgs(["--clean-stage"]).mode === 
 check("--out=<dir> parsed", parseArgs(["--stage", "--out=/tmp/x"]).outDir === "/tmp/x");
 check("--out <dir> parsed", parseArgs(["--stage", "--out", "/tmp/y"]).outDir === "/tmp/y");
 check("default output is publish-stage", parseArgs(["--stage"]).outDir === "publish-stage");
-check("--plugin splits on comma", JSON.stringify(parseArgs(["--stage", "--plugin=top,demo"]).plugins) === '["top","demo"]');
+check("--plugin splits on comma", JSON.stringify(parseArgs(["--stage", "--plugin=top,forges"]).plugins) === '["top","forges"]');
 check("--otp parsed", parseArgs(["--publish", "--otp=123456"]).otp === "123456");
 check("--from-dirs parsed", parseArgs(["--publish", "--from-dirs"]).fromDirs === true);
 check("--dry-run parsed", parseArgs(["--publish", "--dry-run"]).dryRun === true);
@@ -80,10 +80,8 @@ const ids = pluginIds();
 const EXPECTED_PLUGINS = [
   "agent-mux",
   "antigravity-claude",
-  "demo",
   "forges",
   "mcp-tools",
-  "permission-logger",
   "plugin-updates",
   "slash",
   "top",
@@ -100,7 +98,16 @@ check(
 // `uppidi-forge` was a legacy symlink alias of `uppidi-fleet`, not a
 // distinct package. Publishing it would ship the same plugin under two names.
 check("excludes the uppidi-forge alias", !ids.includes("uppidi-forge"));
-check("excludes private plugins like worktree-install", !ids.includes("worktree-install"));
+// Discovery skips `private: true` packages, so a plugin that is never meant
+// to reach npm cannot be staged by accident. The filter is asserted against
+// the discovered set rather than a named plugin: `worktree-install` was the
+// tree's only private plugin until #1493 removed it, and a name-based check
+// would have gone vacuous with it.
+check(
+  "every discovered plugin is publishable",
+  ids.every((id) => manifestFor(id).isPrivate === false),
+  `private plugins leaked into discovery: ${ids.filter((id) => manifestFor(id).isPrivate).join(",")}`
+);
 check("discovers the plugins that matter", ids.includes("top") && ids.includes("mcp-tools") && ids.includes("uppidi-fleet") && ids.includes("wellbeing"));
 const top = manifestFor("top");
 check("top is READY", readiness(top).length === 0);
@@ -124,11 +131,9 @@ function withTempStage(run) {
   }
 }
 
-const demo = manifestFor("demo");
-check("demo files ship source entry points", demo.files.includes("index.client.tsx") && demo.files.includes("index.server.ts"));
-const permissionLogger = manifestFor("permission-logger");
-check("permission-logger is READY", readiness(permissionLogger).length === 0);
-check("permission-logger files ship source entry points", permissionLogger.files.includes("index.client.tsx") && permissionLogger.files.includes("index.server.ts"));
+const forges = manifestFor("forges");
+check("forges files ship source entry points", forges.files.includes("index.client.tsx") && forges.files.includes("index.server.ts"));
+check("forges is READY", readiness(forges).length === 0);
 for (const id of ids) {
   const manifest = manifestFor(id);
   const sourceEntries = fs
@@ -150,13 +155,13 @@ for (const id of ids) {
 
 // --- stagePackages: a restage clears all prior package output ---
 withTempStage((dir) => {
-  const dest = path.join(dir, "demo");
+  const dest = path.join(dir, "forges");
   fs.mkdirSync(path.join(dest, "package"), { recursive: true });
   fs.writeFileSync(path.join(dest, "package", "stale.js"), "stale");
   fs.writeFileSync(path.join(dest, "previous.tgz"), "stale");
   fs.writeFileSync(path.join(dest, "stale-note.txt"), "stale");
-  const filename = "paseo-helper-demo-current.tgz";
-  const staged = stagePackages([demo], {
+  const filename = "paseo-forges-current.tgz";
+  const staged = stagePackages([forges], {
     outDir: dir,
     pack: (_manifest, { destination }) => {
       fs.writeFileSync(path.join(destination, filename), "current");
@@ -164,56 +169,56 @@ withTempStage((dir) => {
     },
   });
   check("restage removes stale extracted and non-tarball output", JSON.stringify(fs.readdirSync(dest)) === JSON.stringify([filename]));
-  check("restage records only the current tarball", staged.packages[0].tarball === path.join("demo", filename));
+  check("restage records only the current tarball", staged.packages[0].tarball === path.join("forges", filename));
 });
 
 // --- resolvePublishPlan: staged tarballs win over dirs ---
 withTempStage((dir) => {
-  fs.mkdirSync(path.join(dir, "demo"), { recursive: true });
-  fs.writeFileSync(path.join(dir, "demo", "demo.tgz"), "fake");
+  fs.mkdirSync(path.join(dir, "forges"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "forges", "forges.tgz"), "fake");
   fs.writeFileSync(
     path.join(dir, "manifest.json"),
     JSON.stringify({
       stagedAt: "2026-01-01T00:00:00Z",
-      packages: [{ id: "demo", publishAs: "@xpufx/paseo-demo", version: demo.version, tarball: "demo/demo.tgz", shasum: "x" }],
+      packages: [{ id: "forges", publishAs: "@xpufx/paseo-forges", version: forges.version, tarball: "forges/forges.tgz", shasum: "x" }],
     }),
   );
-  const plan = resolvePublishPlan([demo], { outDir: dir, fromDirs: false });
-  check("plan uses the staged tarball", plan[0].target === path.join(dir, "demo", "demo.tgz"));
-  check("plan carries the staged version", plan[0].version === demo.version);
+  const plan = resolvePublishPlan([forges], { outDir: dir, fromDirs: false });
+  check("plan uses the staged tarball", plan[0].target === path.join(dir, "forges", "forges.tgz"));
+  check("plan carries the staged version", plan[0].version === forges.version);
 });
 
 // --- resolvePublishPlan: stale version is refused ---
 withTempStage((dir) => {
-  fs.mkdirSync(path.join(dir, "demo"), { recursive: true });
-  fs.writeFileSync(path.join(dir, "demo", "demo.tgz"), "fake");
+  fs.mkdirSync(path.join(dir, "forges"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "forges", "forges.tgz"), "fake");
   fs.writeFileSync(
     path.join(dir, "manifest.json"),
-    JSON.stringify({ packages: [{ id: "demo", version: "0.0.0-stale", tarball: "demo/demo.tgz" }] }),
+    JSON.stringify({ packages: [{ id: "forges", version: "0.0.0-stale", tarball: "forges/forges.tgz" }] }),
   );
-  check("stale staged version is refused", throws(() => resolvePublishPlan([demo], { outDir: dir, fromDirs: false })));
+  check("stale staged version is refused", throws(() => resolvePublishPlan([forges], { outDir: dir, fromDirs: false })));
 });
 
 // --- resolvePublishPlan: missing tarball is refused ---
 withTempStage((dir) => {
   fs.writeFileSync(
     path.join(dir, "manifest.json"),
-    JSON.stringify({ packages: [{ id: "demo", version: demo.version, tarball: "demo/gone.tgz" }] }),
+    JSON.stringify({ packages: [{ id: "forges", version: forges.version, tarball: "forges/gone.tgz" }] }),
   );
-  check("missing staged tarball is refused", throws(() => resolvePublishPlan([demo], { outDir: dir, fromDirs: false })));
+  check("missing staged tarball is refused", throws(() => resolvePublishPlan([forges], { outDir: dir, fromDirs: false })));
 });
 
 // --- resolvePublishPlan: no stage falls back to plugin dirs ---
 withTempStage((dir) => {
-  const plan = resolvePublishPlan([demo], { outDir: dir, fromDirs: false });
-  check("no stage falls back to the plugin dir", plan[0].dir === path.resolve(demo.dir));
+  const plan = resolvePublishPlan([forges], { outDir: dir, fromDirs: false });
+  check("no stage falls back to the plugin dir", plan[0].dir === path.resolve(forges.dir));
 });
 
 // --- resolvePublishPlan: --from-dirs ignores a present stage ---
 withTempStage((dir) => {
   fs.writeFileSync(path.join(dir, "manifest.json"), JSON.stringify({ packages: [] }));
-  const plan = resolvePublishPlan([demo], { outDir: dir, fromDirs: true });
-check("--from-dirs uses the plugin dir", plan[0].dir === path.resolve(demo.dir));
+  const plan = resolvePublishPlan([forges], { outDir: dir, fromDirs: true });
+check("--from-dirs uses the plugin dir", plan[0].dir === path.resolve(forges.dir));
 check("--from-dirs has no tarball target", plan[0].target === undefined);
 });
 

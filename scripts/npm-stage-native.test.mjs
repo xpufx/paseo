@@ -33,10 +33,10 @@ const check = (name, condition) => {
   if (condition) { pass += 1; console.log(`  ok   ${name}`); }
   else { fail += 1; console.error(`  FAIL ${name}`); }
 };
-const entry = { publishAs: "@xpufx/paseo-demo", version: "1.2.3", tarball: "publish-stage/demo/demo.tgz" };
+const entry = { publishAs: "@xpufx/paseo-fixture", version: "1.2.3", tarball: "publish-stage/fixture/fixture.tgz" };
 /** The shape publish-npm.mjs actually writes: tarball relative to the stage dir. */
-const stageEntry = { publishAs: "@xpufx/paseo-demo", version: "1.2.3", tarball: "demo/demo.tgz" };
-const notFound = () => new Error("npm error code E404\nnpm error 404 Not Found - GET https://registry.npmjs.org/@xpufx%2fpaseo-demo - Not found");
+const stageEntry = { publishAs: "@xpufx/paseo-fixture", version: "1.2.3", tarball: "fixture/fixture.tgz" };
+const notFound = () => new Error("npm error code E404\nnpm error 404 Not Found - GET https://registry.npmjs.org/@xpufx%2fpaseo-fixture - Not found");
 
 /** Silence the expected warnings these cases emit. */
 const quiet = (fn) => {
@@ -235,7 +235,7 @@ function fakeNpm({ stageLists = [[]], published = [notFound()], publishError, no
   // A definitive 404 means never published, which is still stageable.
   const { run, calls } = fakeNpm({
     stageLists: [[], [{ packageName: entry.publishAs, version: entry.version, id: "stage-1" }]],
-    published: [new Error("npm error 404 Not Found - GET https://registry.npmjs.org/@xpufx%2fpaseo-demo - Not found")],
+    published: [new Error("npm error 404 Not Found - GET https://registry.npmjs.org/@xpufx%2fpaseo-fixture - Not found")],
   });
   const result = stagePackage(entry, { run, link: "https://forge.example/runs/42" });
   check("definitive 404 still stages", result.outcome === "staged");

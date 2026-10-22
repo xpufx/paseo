@@ -33,7 +33,7 @@ jobs:
     env:
       # Cumulative mirror target set: every plugin directory plus helper. Must
       # match install-smoke.yml — a subset would prune plugins from the target.
-      MIRROR_TARGETS: "top,demo,mcp-tools,forges,x-comms,slash,twofado,plugin-updates,helper"
+      MIRROR_TARGETS: "top,mcp-tools,forges,x-comms,slash,twofado,plugin-updates,helper"
       GIT_AUTHOR_NAME: paseo-mirror
       GIT_AUTHOR_EMAIL: mirror@paseo.invalid
       GIT_COMMITTER_NAME: paseo-mirror

@@ -22,14 +22,12 @@ import path from "node:path";
 export const PLUGINS = {
   "top": ["lifecycle", "core", "ui", "server", "shared"],
   "mcp-tools": ["lifecycle", "core", "ui", "server", "shared", "mcp"],
-  "demo": ["lifecycle", "core", "ui", "server", "shared"],
   "forges": ["lifecycle", "core", "ui", "server", "shared"],
   "slash": ["lifecycle", "core", "ui", "server", "shared"],
   "x-comms": ["lifecycle", "core", "ui", "server", "shared", "mcp"],
   "twofado": ["lifecycle", "core", "ui", "server", "shared"],
   "plugin-updates": ["lifecycle", "core", "ui", "server", "shared"],
   "wellbeing": ["lifecycle", "core", "ui", "server", "shared"],
-  "permission-logger": ["lifecycle", "core", "ui", "server", "shared"],
 };
 
 export const TREES = ["lifecycle", "core", "ui", "server", "shared", "mcp"];

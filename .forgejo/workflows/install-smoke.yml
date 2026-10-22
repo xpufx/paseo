@@ -1,11 +1,11 @@
 # Pre-release install gate: proves the tree the mirror WOULD publish actually
-# installs, before the mirror moves. Replaces the old post-push smoke that only
-# validated `top` + `demo` after the public mirror had already advanced.
+# installs, before the mirror moves. Replaces the old post-push smoke that
+# validated only a subset after the public mirror had already advanced.
 #
 # Order (mirrors .agents/skills/plugin-release/SKILL.md):
 #   1. hygiene     — no private strings / missing READMEs on the publish surface
 #   2. staged tree — mirror-github.mjs --dry-run prepares the exact scoped tree
-#                    (all 8 plugins + helper) and commits it to a temp LOCAL bare
+#                    (the scoped plugin set + helper) and commits it to a temp LOCAL bare
 #                    remote; no GitHub push happens here
 #   3. install     — `paseo plugin add file://<staged> --ref <commit>` for every
 #                    plugin dir, asserting status=running
@@ -52,12 +52,11 @@ on:
         type: string
       plugins:
         description: >-
-          Space-separated plugin DIRECTORY names under plugins/ (default: all
-          eight plugins). Each directory's runtime plugin id is resolved from
-          its paseo-plugin.json manifest after install, so it need not match the
-          directory name.
+          Space-separated plugin DIRECTORY names under plugins/. Each directory's
+          runtime plugin id is resolved from its paseo-plugin.json manifest
+          after install, so it need not match the directory name.
         required: false
-        default: "mcp-tools forges x-comms slash twofado plugin-updates top demo"
+        default: "mcp-tools forges x-comms slash twofado plugin-updates top"
         type: string
       mirror:
         description: >-
@@ -110,8 +109,8 @@ jobs:
       # Cumulative mirror target set: every plugin directory plus helper. Always
       # the full set so the staged tree matches what the mirror publishes (a
       # subset target would prune the other plugins from the public repo).
-      MIRROR_TARGETS: "top,demo,mcp-tools,forges,x-comms,slash,twofado,plugin-updates,helper"
-      DEFAULT_PLUGINS: "mcp-tools forges x-comms slash twofado plugin-updates top demo"
+      MIRROR_TARGETS: "top,mcp-tools,forges,x-comms,slash,twofado,plugin-updates,helper"
+      DEFAULT_PLUGINS: "mcp-tools forges x-comms slash twofado plugin-updates top"
       MIRROR_URL_IN: ${{ github.event.inputs.mirror_url }}
       MIRROR_REF_IN: ${{ github.event.inputs.mirror_ref }}
       PLUGINS_IN: ${{ github.event.inputs.plugins }}

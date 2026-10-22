@@ -49,7 +49,7 @@
  * assembled from a split root prefix rather than written out -- a literal
  * real-looking path in the suite that proves the guard fires would be found by
  * the guard, which is the right answer and an unhelpful place to learn it. This
- * is the same trick worktree-install's client/render.test.ts uses for its own
+ * is the same trick top's client/telemetry-copy.test.ts uses for its own
  * preflight check, and it means nothing is exempt, this file included. Account
  * names are written literally: a bare name is not a home path, only a name
  * following a home root is.
@@ -357,7 +357,7 @@ test("fixture discovery is not vacuous: the leak sites from #621 and #624 are in
     "plugins/uppidi-fleet/client/testing/fleet-fixtures.ts", // #621, the file #624 scrubbed
     "packages/paseo-plugin-helper/src/__tests__/formatters.test.ts", // helper fixture suite, other half of the #624 scope
     "plugins/x-comms/mcp/test/protocol.test.mjs", // the mcp/ tree the issue names
-    "plugins/worktree-install/client/render.test.ts", // the pre-existing in-repo guard
+    "plugins/top/client/telemetry-copy.test.ts", // the pre-existing in-repo guard
   ]) {
     assert.ok(FIXTURE_FILES.includes(known), `${known} must be scanned by the guard`);
   }

@@ -3,8 +3,8 @@ description: >-
   Install one or more Git-managed plugins from a public mirror into a running
   local daemon and assert each reaches status=running (compile + load success).
   The installed runtime id is resolved after install, because it is the
-  paseo-plugin.json manifest id and need not match the plugins/<directory> name
-  (the mirror's demo installs as paseo-helper-demo). Dumps the install output,
+  paseo-plugin.json manifest id and need not match the plugins/<directory> name.
+  Dumps the install output,
   plugin state, and daemon log on failure so a red job is actionable from its
   log alone.
 inputs:
@@ -16,10 +16,10 @@ inputs:
     required: true
   plugins:
     description: >-
-      Space-separated plugin DIRECTORY names under plugins/ (default: all eight
-      plugins). Each directory's runtime plugin id is resolved after install.
+      Space-separated plugin DIRECTORY names under plugins/. Each directory's
+      runtime plugin id is resolved after install.
     required: false
-    default: "mcp-tools forges x-comms slash twofado plugin-updates top demo"
+    default: "mcp-tools forges x-comms slash twofado plugin-updates top"
   host:
     description: "Daemon host target for paseo plugin commands"
     required: false
@@ -39,9 +39,9 @@ runs:
 
         # The runtime plugin id is the daemon's own id for the plugin: the
         # paseo-plugin.json manifest `id` read from the installed checkout. It
-        # is NOT the plugins/<directory> name — the mirror's plugins/demo
-        # manifest has id=paseo-helper-demo — so asserting on the directory name
-        # fails with "Plugin is not configured: demo". Resolve the real id from
+        # is NOT guaranteed to be the plugins/<directory> name — the manifest id
+        # is what the daemon installs by, and asserting on the directory name
+        # fails with "Plugin is not configured: <dir>". Resolve the real id from
         # the `plugin add --json` record, falling back to the manifest inside the
         # daemon's plugin store when that output is unavailable.
         resolve_runtime_id() {
@@ -122,7 +122,7 @@ runs:
           echo "${id} (plugins/${dir}): OK (running)"
         }
 
-        plugins="${INPUT_PLUGINS:-mcp-tools forges x-comms slash twofado plugin-updates top demo}"
+        plugins="${INPUT_PLUGINS:-mcp-tools forges x-comms slash twofado plugin-updates top}"
         failed=0
         for dir in $plugins; do
           install_and_assert "$dir" || failed=1

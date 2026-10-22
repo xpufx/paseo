@@ -109,10 +109,13 @@ are not flagged.
 A raw literal is allowed in exactly two places, and neither is a
 `conformance.json` opt-out:
 
-1. **A plugin's own appearance module.** `worktree-install` deliberately ships
-   its two local palettes (`client/theme.ts`) as the #629 "no shared kit"
-   proof. The allowed paths live in `RAW_COLOR_APPEARANCE_MODULES` in
+1. **A plugin's own appearance module.** A plugin that deliberately ships a
+   local palette instead of reading the host theme registers the file here. The
+   allowed paths live in `RAW_COLOR_APPEARANCE_MODULES` in
    `packages/paseo-plugin-helper/src/cli/rules.ts`, keyed by plugin directory.
+   The registry is empty in this repository — every plugin reads its colors
+   from the host theme — so in practice only the `addTheme` exemption below
+   applies.
 2. **An `addTheme({ colors: { … } })` contribution.** Contributing a host theme
    is the one place raw hex is correct. The scanner balances the call's
    parentheses and skips every line inside the contribution; no marker comment

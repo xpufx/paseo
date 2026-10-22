@@ -1,8 +1,8 @@
 /**
  * Yoga-shaped horizontal layout measurement for rendered trees.
  *
- * Copied from `plugins/worktree-install/client/testing/flex-measure.ts` (itself
- * from `plugins/uppidi-fleet`), which is where #621 wrote it. It lives here so
+ * Copied from `plugins/uppidi-fleet/client/testing/flex-measure.ts`, which is
+ * where #621 wrote it. It lives here so
  * the shared `permission-audit` view can carry the containment invariant from
  * #1043 without importing across a plugin directory. Keep the copies in step,
  * or move this somewhere all three can legitimately reach.

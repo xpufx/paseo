@@ -17,7 +17,7 @@ Monorepo for xpufx [Paseo](https://github.com/getpaseo/paseo) tooling: shared ru
 | [`packages/paseo-plugin-helper/`](packages/paseo-plugin-helper/) | Shared runtime library for Paseo plugins — UI components, server utilities, RPC contracts, settings schema, and testing harness. Published as `paseo-plugin-helper`. | `paseo-plugin-helper` |
 | [`packages/paseo-plugin-ui/`](packages/paseo-plugin-ui/) | Shared UI composition and design primitives for Paseo plugins (HostThemeProvider, HostCard, HostBadge, HostButton, etc.). | `@xpufx/paseo-plugin-ui` |
 | [`packages/mcp-gateway/`](packages/mcp-gateway/) | Typed MCP gateway client and protocol adapter — composite routing, REST control server, and lightweight proxy. | `@xpufx/mcp-gateway` |
-| [`packages/permission-audit/`](packages/permission-audit/) | Standalone permission policy audit and verification tooling. | — |
+| [`packages/permission-audit/`](packages/permission-audit/) | Standalone permission policy audit and verification tooling — the shared home of the permission logger's contracts, JSONL store and audit view, embeddable by any plugin or tool. | — |
 | [`packages/backend/fleet/`](packages/backend/fleet/) | Headless fleet management domain engine — agent roster graph, worktree resolution, queue state machine, and watchdog anomaly classifier. | `@xpufx/backend-fleet` |
 | [`packages/backend/hook/`](packages/backend/hook/) | Multi-forge webhook signature validation and queue engine — HMAC validators, payload normalizers, and queue backends. | `@xpufx/backend-hook` |
 | [`packages/backend/tickets/`](packages/backend/tickets/) | Headless ticket & kanban board domain engine — Forgejo issue tracker, label taxonomy, and Kanban state machine. | `@xpufx/backend-tickets` |
@@ -33,11 +33,8 @@ Monorepo for xpufx [Paseo](https://github.com/getpaseo/paseo) tooling: shared ru
 | [`plugins/slash/`](plugins/slash/) | Slash-command console for custom composer commands with autocomplete support. |
 | [`plugins/twofado/`](plugins/twofado/) | Approval-gate surface for the 2fado privileged-command daemon — approve, deny, or acknowledge risky commands without leaving Paseo. |
 | [`plugins/mcp-tools/`](plugins/mcp-tools/) | MCP server fleet management and diagnostic plugin — list tools, execute them with auto-generated forms, and run diagnostics. |
-| [`plugins/worktree-install/`](plugins/worktree-install/) | Git worktree management and workspace isolation tools — a second fleet surface with Fleet, Queue, and Tickets panels. |
 | [`plugins/plugin-updates/`](plugins/plugin-updates/) | Git-source update monitor and updater for installed plugins — check status, pull updates, one-click refresh. |
 | [`plugins/wellbeing/`](plugins/wellbeing/) | Developer wellbeing and ergonomics assistant — operator presence tracking, circadian schedule management, and fatigue alerting. |
-| [`plugins/permission-logger/`](plugins/permission-logger/) | Permission request and resolution audit logging — records tool calls and permission decisions with agent attribution in a queryable sidebar. |
-| [`plugins/demo/`](plugins/demo/) | Conformance testbed and canonical showcase for plugin helper primitives. |
 | [`plugins/antigravity-claude/`](plugins/antigravity-claude/) | Antigravity Claude plugin provider integration — exposes Claude and GPT models under their own provider name. |
 
 ## Installation

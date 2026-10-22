@@ -36,7 +36,7 @@ const RUNTIME_OVERRIDES = {
  * Every publishable plugin, derived rather than listed (#623).
  *
  * This was a hand-maintained array of eight entries while `pluginIds()` derives
- * eleven, so `uppidi-fleet`, `wellbeing` and `worktree-install` were published
+ * the full set, so `uppidi-fleet` and `wellbeing` were published
  * but never packed here. `uppidi-fleet` is precisely where the #621 leak hid:
  * `client/testing/` (33KB) would have shipped inside the tarball, and nothing in
  * CI assembled that tarball to notice.

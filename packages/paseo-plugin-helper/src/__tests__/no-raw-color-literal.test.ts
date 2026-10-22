@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { auditProject } from "../cli/scanner.js";
+import { RAW_COLOR_APPEARANCE_MODULES } from "../cli/rules.js";
 
 /** Builds a throwaway plugin under a named directory and returns its path. */
 function makePlugin(name: string, files: Record<string, string>): string {
@@ -58,11 +59,32 @@ describe("no-raw-color-literal", () => {
     fs.rmSync(path.dirname(pluginDir), { recursive: true, force: true });
   });
 
-  it("exempts the documented appearance module by plugin path", () => {
-    const pluginDir = makePlugin("worktree-install", {
-      "client/theme.ts": `export const PALETTES = { dark: { canvas: "#0d0f12", text: "#e8ebf0" } };\n`,
+  it("exempts the appearance module of a plugin that registers one", () => {
+    // The registry is the escape hatch for a plugin that deliberately owns a
+    // literal palette instead of reading the host theme. It is empty in this
+    // tree, so the test registers a synthetic plugin for its own duration and
+    // removes it again — the mechanism is what is under test, not any plugin
+    // that happens to be installed.
+    const pluginName = "appearance-owner";
+    RAW_COLOR_APPEARANCE_MODULES[pluginName] = ["client/theme.ts"];
+    try {
+      const pluginDir = makePlugin(pluginName, {
+        "client/theme.ts": `export const PALETTES = { dark: { canvas: "#0d0f12", text: "#e8ebf0" } };\n`,
+      });
+      expect(rawColorIssues(pluginDir)).toEqual([]);
+      fs.rmSync(path.dirname(pluginDir), { recursive: true, force: true });
+    } finally {
+      delete RAW_COLOR_APPEARANCE_MODULES[pluginName];
+    }
+  });
+
+  it("does not exempt an appearance module by path alone", () => {
+    // The exemption is per plugin, not per filename: a `client/theme.ts` in a
+    // plugin that did not register itself is still flagged.
+    const pluginDir = makePlugin("unregistered-theme-owner", {
+      "client/theme.ts": `export const PALETTES = { dark: { canvas: "#0d0f12" } };\n`,
     });
-    expect(rawColorIssues(pluginDir)).toEqual([]);
+    expect(rawColorIssues(pluginDir)).toHaveLength(1);
     fs.rmSync(path.dirname(pluginDir), { recursive: true, force: true });
   });
 

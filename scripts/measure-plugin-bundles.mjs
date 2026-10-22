@@ -40,7 +40,7 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const HELPER_DIR = path.join(ROOT, "packages", "paseo-plugin-helper");
-const PLUGINS = ["demo", "forges", "mcp-tools", "plugin-updates", "slash", "top", "twofado", "x-comms"];
+const PLUGINS = ["forges", "mcp-tools", "plugin-updates", "slash", "top", "twofado", "x-comms"];
 
 const SDK_SPECIFIERS = [
   "@getpaseo/plugin",

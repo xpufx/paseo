@@ -103,6 +103,11 @@ export const permissionAuditQuery = defineContract({
   output: auditQueryOutput,
 });
 
+/**
+ * The legacy contract name, kept so a host that still asks for
+ * `permission-logger.query` keeps working against the shared library. New
+ * callers should use `permissionAuditQuery`.
+ */
 export const permissionLoggerQuery = defineContract({
   name: "permission-logger.query",
   description: "Query logged permission decisions, filtered by agent, model, date range, or decision",
@@ -110,6 +115,12 @@ export const permissionLoggerQuery = defineContract({
   output: auditQueryOutput,
 });
 
+/**
+ * The plugin id the audit log is filed under. It stays `permission-logger`
+ * after the plugin itself was removed (#1493) because the id names the
+ * *directory on disk* — `~/.paseo/plugin-data/xpufx/permission-logger/` — and
+ * renaming it would orphan every log already written.
+ */
 export const PERMISSION_AUDIT_PLUGIN_ID = "permission-logger";
 export const PERMISSION_AUDIT_FILENAME = "permissions.jsonl";
 

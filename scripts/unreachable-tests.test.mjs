@@ -571,7 +571,6 @@ test("test discovery is not vacuous", () => {
 const RUNNER_SHAPES = [
   ["packages/paseo-plugin-helper/src/__tests__/async.test.ts", /paseo-plugin-helper\/package\.json scripts\.test$/],
   ["packages/paseo-plugin-helper/src/__tests__/snapshot.test.ts", /paseo-plugin-helper\/package\.json scripts\.test$/],
-  ["plugins/demo/shared/demo-header-mode.test.ts", /demo\/package\.json scripts\.test$/],
   ["plugins/mcp-tools/client/attribution.test.tsx", /mcp-tools\/package\.json scripts\.test$/],
   ["plugins/slash/server/orchestrate.test.ts", /slash\/package\.json scripts\.test$/],
   ["plugins/twofado/client/ask.test.tsx", /twofado\/package\.json scripts\.test$/],
@@ -584,7 +583,6 @@ const RUNNER_SHAPES = [
   ["plugins/wellbeing/client/entry.test.ts", /wellbeing\/package\.json scripts\.test$/],
   // The trap: named by a vitest positional filter, not by a --test path.
   ["plugins/wellbeing/client/surface.test.tsx", /wellbeing\/package\.json scripts\.test$/],
-  ["plugins/worktree-install/client/render.test.ts", /worktree-install\/package\.json scripts\.test:tsx$/],
   ["plugins/x-comms/index.server.test.ts", /x-comms\/package\.json scripts\.test$/],
   ["plugins/x-comms/mcp/test/redaction-parity.test.mjs", /x-comms\/package\.json scripts\.test$/],
   ["scripts/declared-tooling.test.mjs", /package\.json scripts\.check:declared-tooling$/],
