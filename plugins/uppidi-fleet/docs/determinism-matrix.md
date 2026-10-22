@@ -29,13 +29,13 @@ the easy mistake.
 
 | Label | Parts |
 | --- | ---: |
-| `deterministic` | 117 |
+| `deterministic` | 114 |
 | `hybrid` | 3 |
 | `ai-llm` | 0 |
 | `contested` | 1 |
-| **total** | **121** |
+| **total** | **118** |
 
-Inventory: 113 tracked source files in scope — 64 described above as source (56 files, some carrying several parts) and 57 test suites, which are described by the inventory itself rather than by hand.
+Inventory: 110 tracked source files in scope — 62 described above as source (54 files, some carrying several parts) and 56 test suites, which are described by the inventory itself rather than by hand.
 
 **The `ai-llm` column is empty, and that is the finding rather than a gap.** Nothing in this
 plugin performs model inference: there is no completions call, no provider SDK, no temperature
@@ -50,7 +50,7 @@ See *What this table does not cover* below for the sessions themselves.
 | Moving part | File | File exports | File loc | Classification | Anchors | Evidence |
 | --- | --- | ---: | ---: | --- | --- | --- |
 | RPC registration and plugin lifecycle | `index.server.ts` | 2 | 305 | `deterministic` | `server.handle`, `startHookRouter`, `registerSettingsRpc` | index.server.ts:146-189 — 44 `server.handle(contract, handler)` bindings, one per RPC contract<br>index.server.ts:219 — `startHookRouter(server)` starts the HTTP listener<br>index.server.ts:228-231 — teardown returns a disposer, no model call |
-| Sidebar surface, workspace panel, helper settings screen registration | `index.client.tsx` | 10 | 115 | `deterministic` | `registerSidebarSurface`, `addWorkspacePanel`, `registerHelperSettingsScreen` | index.client.tsx:26-62 — three registrations, each returning a disposer<br>index.client.tsx:64-83 — teardown calls each disposer, tolerating either shape |
+| Sidebar surface, workspace panel, helper settings screen registration | `index.client.tsx` | 7 | 83 | `deterministic` | `registerSidebarSurface`, `addWorkspacePanel`, `registerHelperSettingsScreen` | index.client.tsx:32-57 — three registrations, each returning a disposer<br>index.client.tsx:59-72 — teardown calls each disposer, tolerating either shape |
 
 - **RPC registration and plugin lifecycle** (`index.server.ts`) — Binds contracts to handlers and owns load/unload. Every handler it registers is classified on its own row below.
 - **Sidebar surface, workspace panel, helper settings screen registration** (`index.client.tsx`) — Client lifecycle. All three registrations render over server data classified below.
@@ -133,11 +133,9 @@ See *What this table does not cover* below for the sessions themselves.
 
 | Moving part | File | File exports | File loc | Classification | Anchors | Evidence |
 | --- | --- | ---: | ---: | --- | --- | --- |
-| Barrel re-export for surface, tree-view, panel and tooling | `client/index.ts` | 0 | 8 | `deterministic` | whole file | client/index.ts:1-4 — four `export *` statements, no code |
+| Barrel re-export for surface, tree-view, panel and tooling | `client/index.ts` | 0 | 6 | `deterministic` | whole file | client/index.ts:1-4 — four `export *` statements, no code |
 | Fleet tooling surface: schema-driven manual runner and result viewer | `client/tooling.tsx` | 2 | 398 | `deterministic` | `UppidiFleetToolingView` | tooling.tsx:40-75 — retrieves tool definitions and manages dynamic schema form state<br>tooling.tsx:77-135 — validates required parameters and dispatches RPC tool execution<br>tooling.tsx:185-330 — renders schema-driven form fields with typed controls |
 | Workspace panel and sidebar wrappers, panel registration | `client/panel.tsx` | 6 | 49 | `deterministic` | `UppidiFleetPanel`, `UppidiFleetSidebar`, `registerWorkspacePanel` | panel.tsx:11-19 — the panel mounts the host theme and the required scroll owner<br>panel.tsx:27-33 — the sidebar wrapper mounts the host theme for the sidebar registration<br>panel.tsx:40-49 — registration wraps `client.addWorkspacePanel` |
-| Agent switcher data projection: Front Desk extraction and per-repo orchestrator grouping | `client/agent-switcher-data.ts` | 3 | 59 | `deterministic` | `AgentSwitcherData`, `AgentSwitcherGroup`, `mapAgentSwitcherData` | agent-switcher-data.ts:22-24 — a missing snapshot returns the empty shape rather than a guess<br>agent-switcher-data.ts:35-43 — repo key falls through `project`, `attributedWork.repo`, `labels.repo`, then `"unassigned"`; the first orchestrator per repo wins<br>agent-switcher-data.ts:45-52 — rows are ordered with `localeCompare` and mapped, no model |
-| Agent switcher: navigable sidebar item, popover rows, live agent query, and in-client hand-off | `client/agent-switcher.tsx` | 11 | 373 | `deterministic` | `AGENT_SWITCHER_JUMP_SCREEN_ID`, `AgentSwitcherSidebarIcon`, `AgentSwitcherDropdownProps`, `AgentRowItem`, `AgentSwitcherDropdown`, `AgentSwitcherSidebarItem`, +2 more | agent-switcher.tsx:39-55 — `AgentRowItem` derives its status dot from `getDeterministicStateConfig` over the agent's precomputed state<br>agent-switcher.tsx:150-217 — front desk and orchestrator rows render directly from props, with literal empty states<br>agent-switcher.tsx:295-310 — `useRpcQuery` polls `fleetRosterContract`; selecting a row calls `openScreen` with the jump screen id and the selected agent<br>agent-switcher.tsx:351-362 — the navigable screen forwards the selection to `navigation.openAgent` on mount |
 | Fleet surface: tabs, router status badge, attention card, role-model and metrics dashboards | `client/surface.tsx` | 21 | 3744 | `deterministic` | `UppidiFleetSurface`, `UppidiBrandMark`, `UppidiTopHeaderBar`, `AttentionAgentCard`, `resolveRouterStatusBadge` | surface.tsx:295-306 — router badge is a three-way branch on two booleans<br>surface.tsx:499 — the surface reads every dataset over `useRpc`<br>surface.tsx:1281-1300 — model selection is a `Select` writing the role-model RPC<br>surface.tsx:682-685 — the write reports the server's own message, not a local guess |
 | Forge issues surface: query, filtering, issue rows, status badges | `client/forges-tab.tsx` | 13 | 546 | `deterministic` | `forgeOpenIssuesContract`, `forgeContextContract`, `ForgeIssuesView`, `ForgesTabView` | forges-tab.tsx:21-70 — declares RPC query contracts for forge open issues and context<br>forges-tab.tsx:96-100 — reads issues over useRpcQuery<br>forges-tab.tsx:110-125 — filters issues by client query without model interaction |
 | Fleet Kanban board: column mapping, transitions, ticket cards | `client/kanban-board.tsx` | 14 | 74 | `deterministic` | `KANBAN_COLUMNS`, `getIssueKanbanColumn`, `getColumnTransitions`, `KanbanCard`, `UppidiFleetKanbanBoard` | kanban-board.tsx:21-32 — re-exports canonical column definitions, transitions, and cards from @xpufx/paseo-plugin-ui and backend-tickets<br>kanban-board.tsx:44-56 — UppidiFleetKanbanBoard delegates to shared presentation component; no model call |
@@ -153,8 +151,6 @@ See *What this table does not cover* below for the sessions themselves.
 - **Barrel re-export for surface, tree-view, panel and tooling** (`client/index.ts`) — Pure re-export barrel.
 - **Fleet tooling surface: schema-driven manual runner and result viewer** (`client/tooling.tsx`) — Manual schema-driven tool runner surface. Queries tool schemas and displays execution output.
 - **Workspace panel and sidebar wrappers, panel registration** (`client/panel.tsx`) — Chrome around the surface. No model.
-- **Agent switcher data projection: Front Desk extraction and per-repo orchestrator grouping** (`client/agent-switcher-data.ts`) — Pure snapshot-to-rows projection. It reads fields the server already derived from model-backed sessions and groups them; the grouping is arithmetic over strings.
-- **Agent switcher: navigable sidebar item, popover rows, live agent query, and in-client hand-off** (`client/agent-switcher.tsx`) — Displays the agents array and switches the host view to one of them. Reading a model session's classified state, or navigating to it, is not producing model output.
 - **Fleet surface: tabs, router status badge, attention card, role-model and metrics dashboards** (`client/surface.tsx`) — Renders server state and writes back through the deterministic role-model and settings RPCs. The model picker configures another row's spawn; it does not run a model, so it stays deterministic here.
 - **Forge issues surface: query, filtering, issue rows, status badges** (`client/forges-tab.tsx`) — Renders forge issues for the workspace and filters them deterministically.
 - **Fleet Kanban board: column mapping, transitions, ticket cards** (`client/kanban-board.tsx`) — Interactive Kanban board mapping issues across lifecycle states.
@@ -214,9 +210,8 @@ that enforces the invariant; this table is the readable view of the same fact.
 | Suite | Covers | Runs under | Loc | Classification |
 | --- | --- | --- | ---: | --- |
 | `client/actions-tab.test.tsx` | client/actions-tab | `test:tsx` | 187 | `deterministic` |
-| `client/agent-switcher.test.tsx` | client/agent-switcher | `test:tsx` | 420 | `deterministic` |
 | `client/cross-repo-issues.test.ts` | client/cross-repo-issues | `test:tsx` | 277 | `deterministic` |
-| `client/entry.test.ts` | Surface/panel registration and teardown | `test:tsx` | 1465 | `deterministic` |
+| `client/entry.test.ts` | Surface/panel registration and teardown | `test:tsx` | 1452 | `deterministic` |
 | `client/fleet-state-filter-row.test.ts` | Fleet state filter row rendering | `test:node` | 49 | `deterministic` |
 | `client/forges-tab.test.tsx` | client/forges-tab | `test:tsx` | 448 | `deterministic` |
 | `client/frontdesk-follow-scroll.test.tsx` | client/frontdesk-follow-scroll | `test:tsx` | 316 | `deterministic` |
@@ -231,7 +226,7 @@ that enforces the invariant; this table is the readable view of the same fact.
 | `client/select-stable-rows.test.tsx` | client/select-stable-rows | `test:tsx` | 176 | `deterministic` |
 | `client/surface-halt.test.tsx` | client/surface-halt | `test:tsx` | 270 | `deterministic` |
 | `client/tree-zebra.test.tsx` | Tree zebra striping | `test:tsx` | 47 | `deterministic` |
-| `client/ui-guard.test.ts` | client/ui-guard | `test:tsx` | 155 | `deterministic` |
+| `client/ui-guard.test.ts` | client/ui-guard | `test:tsx` | 68 | `deterministic` |
 | `server/actions.test.ts` | Multi-repo RPC aggregation, error resilience (Promise.allSettled), status filter logic, and run parsing | `test:node` | 732 | `deterministic` |
 | `server/agent-health.test.ts` | server/agent-health | `test:node` | 603 | `deterministic` |
 | `server/agents.test.ts` | Agent normalisation, state derivation, spawn-authority and archive paths | `test:node` | 2407 | `deterministic` |
@@ -298,17 +293,14 @@ matrix above is the judgement half.
 | `bin/fleet-mcp-server.mjs` | script | 120 | 0 | — |
 | `client/actions-tab.test.tsx` | client | 187 | 0 | — |
 | `client/actions-tab.tsx` | client | 449 | 1 | `ActionsTabView` |
-| `client/agent-switcher-data.ts` | client | 59 | 3 | `AgentSwitcherData`, `AgentSwitcherGroup`, `mapAgentSwitcherData` |
-| `client/agent-switcher.test.tsx` | client | 420 | 0 | — |
-| `client/agent-switcher.tsx` | client | 373 | 11 | `AGENT_SWITCHER_JUMP_SCREEN_ID`, `AgentRowItem`, `AgentSwitcherDropdown`, `AgentSwitcherDropdownProps`, `AgentSwitcherJumpScreen`, `AgentSwitcherPopover`, `AgentSwitcherSidebarIcon`, `AgentSwitcherSidebarItem`, `PluginPopoverProps`, `PluginScreenProps`, `PluginSidebarItemProps` |
 | `client/cross-repo-issues.test.ts` | client | 277 | 0 | — |
-| `client/entry.test.ts` | client | 1465 | 0 | — |
+| `client/entry.test.ts` | client | 1452 | 0 | — |
 | `client/fleet-state-filter-row.test.ts` | client | 49 | 0 | — |
 | `client/forges-tab.test.tsx` | client | 448 | 0 | — |
 | `client/forges-tab.tsx` | client | 546 | 13 | `AgentEnvelopeCard`, `CommentCard`, `ForgeIssuesView`, `ForgeIssuesViewProps`, `ForgesTabView`, `MarkdownLite`, `NewIssueComposer`, `ScopedLabelGroup`, `TicketLifecycleView`, `canonicalForgeUrl`, `forgeContextContract`, `forgeOpenIssuesContract` …+1 more |
 | `client/frontdesk-follow-scroll.test.tsx` | client | 316 | 0 | — |
 | `client/host-ui.tsx` | client | 764 | 127 | `ActionBar`, `ActionBarProps`, `AgentEnvelopeCard`, `AttentionBeacon`, `AttentionBeaconMode`, `AttentionBeaconProps`, `AttentionBeaconTone`, `Badge`, `BadgeProps`, `BadgeSize`, `BadgeStyle`, `Button` …+115 more |
-| `client/index.ts` | client | 8 | 0 | — |
+| `client/index.ts` | client | 6 | 0 | — |
 | `client/issue-metrics-bar.test.ts` | client | 64 | 0 | — |
 | `client/kanban-board.test.tsx` | client | 842 | 0 | — |
 | `client/kanban-board.tsx` | client | 74 | 14 | `AutomationTier`, `KANBAN_COLUMNS`, `KanbanCard`, `KanbanCardProps`, `KanbanColumnDef`, `KanbanColumnId`, `KanbanTransitionAction`, `RepoGroup`, `UppidiFleetKanbanBoard`, `UppidiFleetKanbanBoardProps`, `getActiveDraggingIssue`, `getColumnTransitions` …+2 more |
@@ -330,8 +322,8 @@ matrix above is the judgement half.
 | `client/tooling.tsx` | client | 398 | 2 | `UppidiFleetToolingProps`, `UppidiFleetToolingView` |
 | `client/tree-view.tsx` | client | 3485 | 38 | `AgentAttentionBanner`, `AgentAttentionBannerProps`, `AgentHealthGauge`, `AgentHealthGaugeProps`, `AgentInventoryDrawer`, `AgentLabelsRow`, `AgentMetricsCard`, `AgentMetricsCardProps`, `AgentStateDot`, `AgentStatusLight`, `AgentStatusLightProps`, `AgentStatusLightsRow` …+26 more |
 | `client/tree-zebra.test.tsx` | client | 47 | 0 | — |
-| `client/ui-guard.test.ts` | client | 155 | 0 | — |
-| `index.client.tsx` | entry | 115 | 10 | `AGENT_SWITCHER_JUMP_SCREEN_ID`, `AgentSwitcherJumpScreen`, `AgentSwitcherSidebarItem`, `UppidiFleetPanel`, `UppidiFleetSidebar`, `UppidiFleetSurface`, `UppidiForgePanel`, `UppidiForgeSurface`, `contribute`, `registerWorkspacePanel` |
+| `client/ui-guard.test.ts` | client | 68 | 0 | — |
+| `index.client.tsx` | entry | 83 | 7 | `UppidiFleetPanel`, `UppidiFleetSidebar`, `UppidiFleetSurface`, `UppidiForgePanel`, `UppidiForgeSurface`, `contribute`, `registerWorkspacePanel` |
 | `index.server.ts` | entry | 305 | 2 | `contribute`, `registerHookRouterEnvInjection` |
 | `server/actions.test.ts` | server | 732 | 0 | — |
 | `server/actions.ts` | server | 306 | 5 | `filterByStatus`, `handleForgeActionRuns`, `mapForgejoStatus`, `normalizeRepoSlug`, `parseForgejoRun` |

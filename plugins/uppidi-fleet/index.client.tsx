@@ -18,43 +18,16 @@ import {
   UppidiForgePanel,
   UppidiFleetSidebar,
   registerWorkspacePanel,
-  AgentSwitcherSidebarItem,
-  AgentSwitcherJumpScreen,
-  AGENT_SWITCHER_JUMP_SCREEN_ID,
-  type PluginScreenProps,
 } from "./client/index.js";
-import { HostThemeProvider } from "./client/theme.js";
 
-type CompatibleClientContext = PluginClientContext & {
-  addSidebarHeaderItem?: (item: any) => any;
-  addScreen?: (screen: { id: string; title: string; Component: (props: PluginScreenProps) => any }) => any;
-};
+// The helper's structural registrar predates the host's narrower
+// `addSidebarHeaderItem` contribution type.
+type CompatibleClientContext = PluginClientContext & Parameters<typeof registerSidebarSurface>[0];
 
 initClientHelpers({ Icon, Modal, useRpc, useToast, copyText, ScrollView, FlatList, TextInput: HostTextInput });
 
 export default function contribute(rawClient: PluginClientContext) {
   const client = rawClient as CompatibleClientContext;
-  const removeSwitcherItem =
-    typeof client.addSidebarHeaderItem === "function"
-      ? client.addSidebarHeaderItem({
-          id: "uppidi-fleet-agent-switcher",
-          title: "Agent Switcher",
-          Component: AgentSwitcherSidebarItem,
-        })
-      : undefined;
-
-  const removeSwitcherScreen =
-    typeof client.addScreen === "function"
-      ? client.addScreen({
-          id: AGENT_SWITCHER_JUMP_SCREEN_ID,
-          title: "Agent Switcher",
-          Component: (props) => (
-            <HostThemeProvider theme={props.theme}>
-              <AgentSwitcherJumpScreen {...props} />
-            </HostThemeProvider>
-          ),
-        })
-      : undefined;
 
   const removeSidebar = registerSidebarSurface(client, {
     id: "uppidi-fleet",
@@ -85,8 +58,6 @@ export default function contribute(rawClient: PluginClientContext) {
 
   return () => {
     const registrations = [
-      removeSwitcherItem,
-      removeSwitcherScreen,
       removeSettings,
       removePanel,
       removeSidebar,
@@ -108,8 +79,5 @@ export {
   UppidiForgePanel,
   UppidiFleetSidebar,
   registerWorkspacePanel,
-  AgentSwitcherSidebarItem,
-  AgentSwitcherJumpScreen,
-  AGENT_SWITCHER_JUMP_SCREEN_ID,
 };
 

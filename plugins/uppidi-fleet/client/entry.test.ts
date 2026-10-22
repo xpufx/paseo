@@ -59,18 +59,6 @@ describe("uppidi-fleet client entry contract", () => {
       /icon:\s*["']GitPullRequest["']/,
       "workspace panel must specify icon 'GitPullRequest'",
     );
-
-    assert.match(
-      source,
-      /client\.addSidebarHeaderItem\s*\(\s*\{[\s\S]*id:\s*["']uppidi-fleet-agent-switcher["'][\s\S]*\}\s*\)/,
-      "index.client.tsx must register the agent switcher as a navigable sidebar item",
-    );
-
-    assert.match(
-      source,
-      /client\.addScreen\s*\(\s*\{[\s\S]*Component:\s*\(props\)\s*=>[\s\S]*<HostThemeProvider\s+theme=\{props\.theme\}>[\s\S]*<AgentSwitcherJumpScreen/,
-      "index.client.tsx must register the jump screen and wrap it in HostThemeProvider",
-    );
   });
 
 
@@ -1443,7 +1431,6 @@ describe("uppidi-fleet client entry contract", () => {
         "panel.tsx",
         "tooling.tsx",
         "kanban-board.tsx",
-        "agent-switcher.tsx",
         "metrics-bar.tsx",
         "theme.ts",
         "host-ui.tsx",
