@@ -1,7 +1,5 @@
 {
   "id": "uppidi-fleet",
-  "name": "Uppidi Fleet",
-  "description": "Full-lifecycle autonomous engineering fleet management driven by Forgejo issue boards",
   "requirements": {
     "paseo": ">=0.8.0"
   },

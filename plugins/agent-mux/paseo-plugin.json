@@ -1,7 +1,5 @@
 {
   "id": "agent-mux",
-  "name": "Agent Mux",
-  "description": "Metrics, account profile inspection, and live rate-limit quota monitoring for agent-mux",
   "requirements": {
     "paseo": ">=0.9.0"
   }

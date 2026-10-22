@@ -1,6 +1,6 @@
 {
   "id": "plugin-updates",
-  "name": "Plugin Updates",
-  "description": "Monitor installed Paseo plugins for git updates with directory status, diff links, and one-click pulls",
-  "requirements": { "paseo": ">=0.8.0" }
+  "requirements": {
+    "paseo": ">=0.8.0"
+  }
 }

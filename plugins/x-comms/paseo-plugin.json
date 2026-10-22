@@ -1,9 +1,17 @@
 {
   "id": "x-comms",
-  "name": "X-comms",
-  "description": "Cross-daemon agent messaging and MCP tooling over Paseo Relay and direct daemon hosts",
-  "requirements": { "paseo": ">=0.9.0" },
+  "requirements": {
+    "paseo": ">=0.9.0"
+  },
   "build": [
-    ["npm", "install", "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund", "--no-workspaces"]
+    [
+      "npm",
+      "install",
+      "--omit=dev",
+      "--ignore-scripts",
+      "--no-audit",
+      "--no-fund",
+      "--no-workspaces"
+    ]
   ]
 }
