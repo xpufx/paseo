@@ -928,6 +928,199 @@ describe("hook-router HTTP server endpoints", () => {
     assert.ok(Array.isArray(body.queues));
   });
 
+  describe("fleet agent health endpoints (#1499)", () => {
+    it("GET /agents/health returns taxonomy, dead sessions, and pending permissions", async () => {
+      const map = new Map<string, WatchdogAgent>([
+        [
+          "worker-wedged",
+          {
+            id: "worker-wedged",
+            title: "Worker Wedged",
+            status: "running",
+            pendingPermissions: [
+              { id: "perm-1", tool: "run_command", title: "run bash command" },
+            ],
+          },
+        ],
+        ["orch-healthy", { id: "orch-healthy", title: "Orchestrator", status: "idle" }],
+      ]);
+      (router as any).fetchAgentMap = async () => map;
+      (router as any).runWatchdogAudit = async () => ({
+        ok: true,
+        timestamp: 1_700_000_000_000,
+        audited: { orchestrators: 1, agents: 2, queues: 0 },
+        anomalies: [
+          {
+            type: "PENDING_PERMISSION_BLOCKED",
+            agentId: "worker-wedged",
+            severity: "high",
+            permissions: map.get("worker-wedged")!.pendingPermissions,
+          },
+        ],
+        deadSessions: [
+          {
+            agentId: "dead-worker",
+            name: "Dead Worker",
+            liveStatus: "error",
+            deadPredicates: ["DEAD_TERMINAL_FATAL_ERROR"],
+            deadReasons: ["fatal"],
+            registrations: [],
+            activeWorkers: 0,
+            killAllowed: true,
+            killBlockedReasons: [],
+            supersededBy: null,
+          },
+        ],
+      });
+
+      const res = await fetch(`http://127.0.0.1:${router.port}/agents/health`);
+      assert.equal(res.status, 200);
+      const body = await res.json();
+      assert.equal(body.ok, true);
+      assert.equal(body.service, "uppidi-fleet-hook-router");
+      assert.equal(body.audited.agents, 2);
+      assert.ok(body.taxonomy.includes("PENDING_PERMISSION_BLOCKED"));
+      assert.equal(body.deadSessions.length, 1);
+      assert.equal(body.deadSessions[0].agentId, "dead-worker");
+      assert.equal(body.pendingPermissions.length, 1);
+      assert.equal(body.pendingPermissions[0].agentId, "worker-wedged");
+      assert.equal(body.pendingPermissions[0].permissions[0].id, "perm-1");
+
+      const wedged = body.agents.find((a: any) => a.agentId === "worker-wedged");
+      assert.ok(wedged);
+      assert.equal(wedged.healthy, false);
+      assert.deepEqual(wedged.taxonomy, ["PENDING_PERMISSION_BLOCKED"]);
+      assert.equal(wedged.deadPredicates.length, 0);
+      assert.equal(wedged.pendingPermissions.length, 1);
+
+      const healthy = body.agents.find((a: any) => a.agentId === "orch-healthy");
+      assert.ok(healthy);
+      assert.equal(healthy.healthy, true);
+    });
+
+    it("POST /agents/health/recover applies kill-safety guards", async () => {
+      const archived: string[] = [];
+      const safeVerdict = {
+        agentId: "safe-dead",
+        name: "Safe Dead",
+        liveStatus: "error",
+        deadPredicates: ["DEAD_TERMINAL_FATAL_ERROR"],
+        deadReasons: ["fatal"],
+        registrations: [],
+        activeWorkers: 0,
+        killAllowed: true,
+        killBlockedReasons: [],
+        supersededBy: null,
+      };
+      const blockedVerdict = {
+        ...safeVerdict,
+        agentId: "frontdesk-dead",
+        name: "Front Desk",
+        killAllowed: false,
+        killBlockedReasons: ["registered front desk"],
+      };
+      (router as any).runWatchdogAudit = async () => ({
+        ok: true,
+        timestamp: 1_700_000_000_001,
+        audited: { orchestrators: 1, agents: 2, queues: 0 },
+        anomalies: [],
+        deadSessions: [safeVerdict, blockedVerdict],
+      });
+      (router as any).archiveAgent = async (id: string) => {
+        archived.push(id);
+        return true;
+      };
+
+      const res = await fetch(`http://127.0.0.1:${router.port}/agents/health/recover`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kill: true }),
+      });
+      assert.equal(res.status, 200);
+      const body = await res.json();
+      assert.equal(body.ok, true);
+      assert.equal(body.dryRun, false);
+      assert.equal(body.applied, true);
+      assert.equal(body.killed, true);
+      assert.equal(body.totalDead, 2);
+      assert.equal(body.recovered, 1);
+      assert.deepEqual(archived, ["safe-dead"]);
+      assert.ok(body.pruned.some((p: any) => p.agentId === "safe-dead" && p.action === "killed"));
+      assert.ok(body.pruned.some((p: any) => p.agentId === "frontdesk-dead" && p.action === "blocked"));
+    });
+
+    it("POST /agents/health/recover defaults to a non-destructive apply", async () => {
+      const archived: string[] = [];
+      (router as any).runWatchdogAudit = async () => ({
+        ok: true,
+        timestamp: 1_700_000_000_002,
+        audited: { orchestrators: 0, agents: 1, queues: 0 },
+        anomalies: [],
+        deadSessions: [
+          {
+            agentId: "safe-dead-2",
+            name: "Safe Dead 2",
+            liveStatus: "error",
+            deadPredicates: ["DEAD_TERMINAL_FATAL_ERROR"],
+            deadReasons: ["fatal"],
+            registrations: [],
+            activeWorkers: 0,
+            killAllowed: true,
+            killBlockedReasons: [],
+            supersededBy: null,
+          },
+        ],
+      });
+      (router as any).archiveAgent = async (id: string) => {
+        archived.push(id);
+        return true;
+      };
+
+      const res = await fetch(`http://127.0.0.1:${router.port}/agents/health/recover`, { method: "POST" });
+      assert.equal(res.status, 200);
+      const body = await res.json();
+      assert.equal(body.dryRun, false);
+      assert.equal(body.killed, false);
+      assert.deepEqual(archived, [], "kill must require an explicit request");
+      assert.ok(body.pruned.some((p: any) => p.agentId === "safe-dead-2" && p.action === "prune_registry"));
+    });
+
+    it("POST /agents/health/recover honors dryRun", async () => {
+      (router as any).runWatchdogAudit = async () => ({
+        ok: true,
+        timestamp: 1_700_000_000_003,
+        audited: { orchestrators: 0, agents: 1, queues: 0 },
+        anomalies: [],
+        deadSessions: [
+          {
+            agentId: "safe-dead-3",
+            name: "Safe Dead 3",
+            liveStatus: "error",
+            deadPredicates: ["DEAD_TERMINAL_FATAL_ERROR"],
+            deadReasons: ["fatal"],
+            registrations: [],
+            activeWorkers: 0,
+            killAllowed: true,
+            killBlockedReasons: [],
+            supersededBy: null,
+          },
+        ],
+      });
+      const res = await fetch(`http://127.0.0.1:${router.port}/agents/health/recover`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dryRun: true, kill: true }),
+      });
+      assert.equal(res.status, 200);
+      const body = await res.json();
+      assert.equal(body.dryRun, true);
+      assert.equal(body.applied, false);
+      assert.equal(body.killed, false);
+      assert.equal(body.recovered, 0);
+      assert.ok(body.pruned.some((p: any) => p.agentId === "safe-dead-3" && p.action === "would_kill"));
+    });
+  });
+
   describe("GET /board/sweep (#1413)", () => {
     it("responds to GET /board/sweep with 400 when repo is missing", async () => {
       const res = await fetch(`http://127.0.0.1:${router.port}/board/sweep`);
@@ -4555,6 +4748,74 @@ describe("hook-router orchestrator pruning (#458)", () => {
       assert.ok(map);
       assert.equal(map!.has("sdk-only"), true, "SDK entries must survive the CLI merge");
       assert.equal(map!.has("cli-global"), true, "the global CLI roster must always be consulted");
+    } finally {
+      setExecFileAsyncForTest(null);
+    }
+  });
+
+  it("fuses `paseo permit ls --json` into the global CLI roster (#1499)", async () => {
+    const router = new HookRouter(null, { queueDir, stateDir, port: 0 });
+    setExecFileAsyncForTest(async (_cmd: string, args: readonly string[]) => {
+      if (args[0] === "ls") {
+        return {
+          stdout: JSON.stringify([
+            { id: "cli-wedged", status: "running" },
+            { id: "cli-healthy", status: "idle" },
+          ]),
+        };
+      }
+      if (args[0] === "permit" && args[1] === "ls") {
+        return {
+          stdout: JSON.stringify([
+            { agentId: "cli-wedged", id: "perm-1", tool: "run_command", title: "run bash" },
+            { agentId: "cli-wedged", id: "perm-1", tool: "run_command", title: "duplicate" },
+            { agentId: "unknown-agent", id: "perm-x" },
+          ]),
+        };
+      }
+      return { stdout: "" };
+    });
+    try {
+      const map = await router.fetchAgentMap();
+      assert.ok(map);
+      const wedged = map!.get("cli-wedged");
+      assert.ok(wedged);
+      assert.equal(wedged!.pendingPermissions?.length, 1, "duplicate permission ids must be fused once");
+      assert.equal(wedged!.pendingPermissions?.[0]?.id, "perm-1");
+      assert.equal(wedged!.requiresAttention, true);
+      assert.equal(map!.get("cli-healthy")?.pendingPermissions, undefined);
+      assert.equal(map!.has("unknown-agent"), false, "permissions for absent agents must not invent entries");
+    } finally {
+      setExecFileAsyncForTest(null);
+    }
+  });
+
+  it("preserves SDK pending permissions when the CLI roster lacks them (#1499)", async () => {
+    const router = new HookRouter(null, { queueDir, stateDir, port: 0 });
+    (router as any).activePaseo = {
+      agents: {
+        list: async () => ({
+          entries: [
+            {
+              id: "sdk-wedged",
+              status: "running",
+              pendingPermissions: [{ id: "sdk-perm", tool: "run_command" }],
+            },
+          ],
+        }),
+      },
+    };
+    setExecFileAsyncForTest(async (_cmd: string, args: readonly string[]) => {
+      if (args[0] === "ls") {
+        return { stdout: JSON.stringify([{ id: "sdk-wedged", status: "running" }]) };
+      }
+      return { stdout: "[]" };
+    });
+    try {
+      const map = await router.fetchAgentMap();
+      assert.ok(map);
+      assert.equal(map!.get("sdk-wedged")?.pendingPermissions?.length, 1);
+      assert.equal(map!.get("sdk-wedged")?.pendingPermissions?.[0]?.id, "sdk-perm");
     } finally {
       setExecFileAsyncForTest(null);
     }

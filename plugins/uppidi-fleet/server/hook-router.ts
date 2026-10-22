@@ -1760,6 +1760,33 @@ export interface WatchdogAgent {
   timeline?: unknown;
 }
 
+/** Stable request identity for a pending permission (SDK and CLI disagree on key). */
+function permissionIdentity(permission: WatchdogPermission | null | undefined): string | null {
+  if (!permission) return null;
+  const id = permission.id ?? permission.requestId;
+  if (id) return String(id);
+  const tool = permission.tool ?? permission.name ?? permission.title;
+  return tool ? `tool:${String(tool)}` : null;
+}
+
+/** Merge permission lists without duplicating the same request (#1499). */
+function dedupeWatchdogPermissions(
+  permissions: Array<WatchdogPermission | null | undefined>,
+): WatchdogPermission[] {
+  const out: WatchdogPermission[] = [];
+  const seen = new Set<string>();
+  for (const permission of permissions) {
+    if (!permission) continue;
+    const identity = permissionIdentity(permission);
+    if (identity) {
+      if (seen.has(identity)) continue;
+      seen.add(identity);
+    }
+    out.push(permission);
+  }
+  return out;
+}
+
 export interface WatchdogAnomaly {
   type: WatchdogAnomalyType;
   agentId?: string;
@@ -1856,6 +1883,69 @@ export interface WatchdogAuditResult {
   anomalies: WatchdogAnomaly[];
   /** Dead session verdicts from the health-canary pass (#1328). */
   deadSessions?: DeadSessionVerdict[];
+}
+
+/** Pending-permission escalation surfaced by the HTTP health endpoint (#1499). */
+export interface AgentPendingPermissionReport {
+  agentId: string;
+  title: string | null;
+  status: string | null;
+  permissions: WatchdogPermission[];
+}
+
+/** Per-agent structured health row returned by `GET /agents/health` (#1499). */
+export interface AgentHealthReportEntry {
+  agentId: string;
+  title: string | null;
+  status: string | null;
+  role: string | null;
+  /** True when the agent is a registered fleet member (roster or parentage). */
+  fleet: boolean;
+  healthy: boolean;
+  pendingPermissions: WatchdogPermission[];
+  taxonomy: WatchdogTaxonomyType[];
+  deadPredicates: DeadPredicateType[];
+  requiresAttention: boolean;
+  attentionReason: string | null;
+}
+
+/**
+ * Structured watchdog health report (#1499). Mirrors `fleet_watchdog_audit`
+ * while adding the fused agent map, per-agent taxonomy, and pending-permission
+ * index so runtimes without MCP injection can observe the same health state.
+ */
+export interface AgentHealthReport {
+  ok: boolean;
+  timestamp: number;
+  service: string;
+  audited: { orchestrators: number; agents: number; queues: number };
+  taxonomy: readonly WatchdogTaxonomyType[];
+  agents: AgentHealthReportEntry[];
+  pendingPermissions: AgentPendingPermissionReport[];
+  anomalies: WatchdogAnomaly[];
+  deadSessions: DeadSessionVerdict[];
+}
+
+/** One dead-session action from `POST /agents/health/recover` (#1499). */
+export interface DeadSessionRecoveryAction {
+  agentId: string;
+  name: string | null;
+  action: string;
+  reason: string;
+}
+
+/** Structured dead-session recovery result (#1499), parity with prune MCP. */
+export interface DeadSessionRecoveryResult {
+  ok: boolean;
+  timestamp: number;
+  dryRun: boolean;
+  applied: boolean;
+  killed: boolean;
+  totalDead: number;
+  recovered: number;
+  pruned: DeadSessionRecoveryAction[];
+  deadSessions: DeadSessionVerdict[];
+  audit: { audited: WatchdogAuditResult["audited"]; anomalies: WatchdogAnomaly[] };
 }
 
 // ---------------------------------------------------------------------------
@@ -8839,6 +8929,82 @@ export class HookRouter {
     return { ok: false, error: "not found", key: repoOrKey };
   }
 
+  /**
+   * Merge a daemon roster entry into an already-seen agent. The global CLI
+   * roster omits `pendingPermissions`, so a later CLI entry must never clobber
+   * permission data captured from the SDK snapshot (#1499).
+   */
+  private mergeAgentEntry(
+    existing: WatchdogAgent | undefined,
+    incoming: WatchdogAgent,
+  ): WatchdogAgent {
+    if (!existing) return incoming;
+    const merged: WatchdogAgent = { ...existing, ...incoming };
+    const existingPermissions = Array.isArray(existing.pendingPermissions)
+      ? existing.pendingPermissions
+      : [];
+    const incomingPermissions = Array.isArray(incoming.pendingPermissions)
+      ? incoming.pendingPermissions
+      : [];
+    if (existingPermissions.length > 0 || incomingPermissions.length > 0) {
+      merged.pendingPermissions = dedupeWatchdogPermissions([
+        ...existingPermissions,
+        ...incomingPermissions,
+      ]);
+    } else if (incoming.pendingPermissions === undefined) {
+      merged.pendingPermissions = existing.pendingPermissions;
+    }
+    return merged;
+  }
+
+  /**
+   * Fuse pending permission requests into a live agent map (#1499).
+   *
+   * `paseo ls --json --global` does not include `pendingPermissions`, so a
+   * worker wedged on a tool permission is otherwise invisible to the watchdog.
+   * SDK roster entries already carry the field; this pass fills the gap from
+   * `paseo permit ls --json` for agents sourced from the CLI roster.
+   * Best-effort: any failure leaves the fused map untouched.
+   */
+  private async fusePendingPermissions(map: Map<string, WatchdogAgent>): Promise<void> {
+    if (map.size === 0) return;
+    const isTest = this.isTestMode || process.env.NODE_ENV === "test";
+    const hasCliStub =
+      execFileAsync !== defaultExecFileAsync ||
+      Boolean(process.env.PATH?.split(":")[0]?.includes("paseo-stub"));
+    if (!this.options?.allowCliSpawn && isTest && !hasCliStub) {
+      // Hermetic tests have no CLI. SDK-derived pending permissions were
+      // already preserved by mergeAgentEntry above.
+      return;
+    }
+    try {
+      const { stdout } = await execFileAsync("paseo", ["permit", "ls", "--json"], {
+        timeout: 5000,
+      });
+      if (!stdout || !String(stdout).trim()) return;
+      const parsed = JSON.parse(String(stdout));
+      if (!Array.isArray(parsed)) return;
+      for (const item of parsed) {
+        const agentId = typeof item?.agentId === "string" ? item.agentId : undefined;
+        if (!agentId) continue;
+        const agent = map.get(agentId);
+        if (!agent) continue;
+        const permissions = Array.isArray(agent.pendingPermissions)
+          ? agent.pendingPermissions
+          : [];
+        agent.pendingPermissions = dedupeWatchdogPermissions([
+          ...permissions,
+          item as WatchdogPermission,
+        ]);
+        // The watchdog must see the permission even when the daemon roster
+        // omitted the attention flag that normally accompanies it.
+        if (agent.requiresAttention === undefined) agent.requiresAttention = true;
+      }
+    } catch {
+      // Best-effort: permission listing is unavailable on older CLIs.
+    }
+  }
+
   public async fetchAgentMap(): Promise<Map<string, WatchdogAgent> | null> {
     const map = new Map<string, WatchdogAgent>();
     const paseo = this.getPaseo();
@@ -8849,7 +9015,7 @@ export class HookRouter {
         if (Array.isArray(entries)) {
           for (const entry of entries) {
             const a: any = entry?.agent ?? entry;
-            if (a?.id) map.set(a.id, a);
+            if (a?.id) map.set(a.id, this.mergeAgentEntry(map.get(a.id), a));
           }
         }
       } catch {
@@ -8870,14 +9036,16 @@ export class HookRouter {
       const parsed = JSON.parse(stdout);
       if (Array.isArray(parsed)) {
         for (const item of parsed) {
-          if (item?.id) map.set(item.id, item);
+          if (item?.id) map.set(item.id, this.mergeAgentEntry(map.get(item.id), item));
         }
       }
+      await this.fusePendingPermissions(map);
       return map;
     } catch {
       // The global roster is the only completeness guarantee. Without it the
       // SDK-derived entries are partial, so callers must avoid hard pruning.
       if (map.size > 0) {
+        await this.fusePendingPermissions(map);
         partialAgentMaps.add(map);
         return map;
       }
@@ -9935,6 +10103,179 @@ export class HookRouter {
       },
       anomalies,
       deadSessions: deadSessions.length > 0 ? deadSessions : undefined,
+    };
+  }
+
+  /**
+   * Build the structured `GET /agents/health` payload (#1499).
+   *
+   * Runs the same zero-token audit as `fleet_watchdog_audit` (recovery and
+   * background side effects disabled) and annotates every live agent with its
+   * taxonomy, dead predicates, and pending permissions. Runtimes without MCP
+   * tool injection get first-class parity over HTTP.
+   */
+  public async buildAgentHealthReport(opts: WatchdogAuditOptions = {}): Promise<AgentHealthReport> {
+    const audit = await this.runWatchdogAudit({
+      ...opts,
+      recover: false,
+      childWakeups: false,
+      metricsRollup: false,
+    });
+    const map =
+      opts.agentMap ?? this.latestAgentMap ?? (await this.fetchAgentMap().catch(() => null));
+    const orchRecords = opts.orchestratorRecords ?? this.listOrchestratorRecords();
+    const frontDeskId = opts.frontDeskId ?? this.readFrontDesk()?.agentId ?? null;
+    const fleetAgentIds = new Set(
+      orchRecords.map((record) => record.agentId).filter((id): id is string => Boolean(id)),
+    );
+    const roster: FleetRoster = { frontDeskId: frontDeskId ?? null, orchestratorIds: fleetAgentIds };
+
+    const taxonomyByAgent = new Map<string, WatchdogTaxonomyType[]>();
+    for (const anomaly of audit.anomalies) {
+      if (!anomaly.agentId) continue;
+      if (!(WATCHDOG_TAXONOMY as readonly string[]).includes(anomaly.type)) continue;
+      const list = taxonomyByAgent.get(anomaly.agentId) ?? [];
+      if (!list.includes(anomaly.type as WatchdogTaxonomyType)) {
+        list.push(anomaly.type as WatchdogTaxonomyType);
+      }
+      taxonomyByAgent.set(anomaly.agentId, list);
+    }
+
+    const deadPredicatesByAgent = new Map<string, DeadPredicateType[]>();
+    for (const verdict of audit.deadSessions ?? []) {
+      deadPredicatesByAgent.set(verdict.agentId, [...verdict.deadPredicates]);
+    }
+
+    const agents: AgentHealthReportEntry[] = [];
+    const pendingPermissions: AgentPendingPermissionReport[] = [];
+    if (map) {
+      for (const agent of map.values()) {
+        if (agent.archivedAt) continue;
+        const permissions = Array.isArray(agent.pendingPermissions)
+          ? dedupeWatchdogPermissions(agent.pendingPermissions)
+          : [];
+        const taxonomy = [...(taxonomyByAgent.get(agent.id) ?? [])];
+        const deadPredicates = [...(deadPredicatesByAgent.get(agent.id) ?? [])];
+        agents.push({
+          agentId: agent.id,
+          title: agent.title ?? agent.name ?? null,
+          status: agent.status ?? null,
+          role: agent.role ?? null,
+          fleet: _isFleetMember(agent, roster),
+          healthy: taxonomy.length === 0 && deadPredicates.length === 0 && permissions.length === 0,
+          pendingPermissions: permissions,
+          taxonomy,
+          deadPredicates,
+          requiresAttention: agent.requiresAttention === true,
+          attentionReason: agent.attentionReason ?? null,
+        });
+        if (permissions.length > 0) {
+          pendingPermissions.push({
+            agentId: agent.id,
+            title: agent.title ?? agent.name ?? null,
+            status: agent.status ?? null,
+            permissions,
+          });
+        }
+      }
+    }
+
+    return {
+      ok: true,
+      timestamp: audit.timestamp,
+      service: "uppidi-fleet-hook-router",
+      audited: audit.audited,
+      taxonomy: [...WATCHDOG_TAXONOMY],
+      agents,
+      pendingPermissions,
+      anomalies: audit.anomalies,
+      deadSessions: audit.deadSessions ?? [],
+    };
+  }
+
+  /**
+   * Execute dead-session recovery for `POST /agents/health/recover` (#1499).
+   *
+   * Mirrors `fleet_prune_dead_sessions`: kill-safety guards from the watchdog
+   * verdicts are authoritative, and a session is archived only when both
+   * `kill` and the guard allow it. Registry-only pruning is reported so callers
+   * can run the MCP prune tool for the destructive follow-up.
+   */
+  public async recoverDeadSessions(opts: {
+    dryRun?: boolean;
+    kill?: boolean;
+    audit?: WatchdogAuditResult;
+  } = {}): Promise<DeadSessionRecoveryResult> {
+    const audit =
+      opts.audit ??
+      (await this.runWatchdogAudit({
+        recover: false,
+        childWakeups: false,
+        metricsRollup: false,
+      }));
+    const deadSessions = audit.deadSessions ?? [];
+    const dryRun = opts.dryRun ?? true;
+    const kill = opts.kill === true;
+    const pruned: DeadSessionRecoveryAction[] = [];
+    let recovered = 0;
+
+    for (const ds of deadSessions) {
+      if (dryRun) {
+        pruned.push({
+          agentId: ds.agentId,
+          name: ds.name,
+          action: ds.killAllowed ? "would_kill" : "would_prune_registry",
+          reason:
+            ds.killBlockedReasons.length > 0
+              ? ds.killBlockedReasons.join("; ")
+              : ds.deadPredicates.join(", "),
+        });
+        continue;
+      }
+      if (!ds.killAllowed) {
+        pruned.push({
+          agentId: ds.agentId,
+          name: ds.name,
+          action: "blocked",
+          reason: ds.killBlockedReasons.join("; "),
+        });
+        continue;
+      }
+      if (!kill) {
+        pruned.push({
+          agentId: ds.agentId,
+          name: ds.name,
+          action: "prune_registry",
+          reason: ds.deadPredicates.join(", "),
+        });
+        continue;
+      }
+      let killed = false;
+      try {
+        killed = await this.archiveAgent(ds.agentId, "dead-session-recover");
+      } catch {
+        killed = false;
+      }
+      if (killed) recovered += 1;
+      pruned.push({
+        agentId: ds.agentId,
+        name: ds.name,
+        action: killed ? "killed" : "kill_failed",
+        reason: ds.deadPredicates.join(", "),
+      });
+    }
+
+    return {
+      ok: true,
+      timestamp: audit.timestamp,
+      dryRun,
+      applied: !dryRun,
+      killed: kill && !dryRun,
+      totalDead: deadSessions.length,
+      recovered,
+      pruned,
+      deadSessions,
+      audit: { audited: audit.audited, anomalies: audit.anomalies },
     };
   }
 
@@ -12950,6 +13291,34 @@ export class HookRouter {
           isListening: info.isListening,
           registeredRepoKeys: info.registeredRepoKeys,
         });
+        return;
+      }
+
+      if (req.method === "GET" && pathname === "/agents/health") {
+        const frontDeskId = url.searchParams.get("frontDeskId")?.trim() || undefined;
+        const staleParam = Number(url.searchParams.get("runningStaleSeconds"));
+        const runningStaleSeconds =
+          Number.isFinite(staleParam) && staleParam > 0 ? staleParam : undefined;
+        try {
+          const report = await this.buildAgentHealthReport({ frontDeskId, runningStaleSeconds });
+          this.sendJson(res, 200, report);
+        } catch (err: any) {
+          this.sendJson(res, 500, { ok: false, error: err?.message ?? String(err) });
+        }
+        return;
+      }
+
+      if (req.method === "POST" && pathname === "/agents/health/recover") {
+        const body = await this.readJsonBody(req).catch(() => ({}));
+        try {
+          const result = await this.recoverDeadSessions({
+            dryRun: body?.dryRun === true,
+            kill: body?.kill === true,
+          });
+          this.sendJson(res, 200, result);
+        } catch (err: any) {
+          this.sendJson(res, 500, { ok: false, error: err?.message ?? String(err) });
+        }
         return;
       }
 
