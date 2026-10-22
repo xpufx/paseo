@@ -188,11 +188,24 @@ function workspaceCandidateKeys(workspace: WorkspaceRecord, project?: ProjectRec
   add(workspace.mainRepoRoot);
   add(project?.rootPath);
   add(workspace.cwd);
-  add(workspace.displayName);
   add(project?.displayName);
-  if (workspace.cwd) add(basename(workspace.cwd));
+
+  const candidateDirs = [
+    workspace.mainRepoRoot,
+    workspace.worktreeRoot,
+    project?.rootPath,
+    workspace.cwd,
+  ];
+  for (const dir of candidateDirs) {
+    if (dir && typeof dir === "string" && existsSync(dir)) {
+      const pKey = canonicalProjectKey(dir);
+      if (pKey) keys.add(pKey.toLowerCase());
+    }
+  }
+
   if (workspace.mainRepoRoot) add(basename(workspace.mainRepoRoot));
   if (project?.rootPath) add(basename(project.rootPath));
+  if (!isWorktreeRecord(workspace) && workspace.cwd) add(basename(workspace.cwd));
 
   return [...keys];
 }

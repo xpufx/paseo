@@ -872,9 +872,10 @@ export function formatProjectDisplay(
   let rawName = (
     p.displayName ||
     p.repo ||
-    p.name ||
+    (p.name && !p.name.startsWith("git-root:") && !p.name.startsWith("non-git:") ? p.name : undefined) ||
     (p.rootPath ? p.rootPath.split("/").filter(Boolean).pop() : undefined) ||
-    (p.cwd ? p.cwd.split("/").filter(Boolean).pop() : undefined) ||
+    (p.cwd && !p.cwd.includes("/.paseo/worktrees/") ? p.cwd.split("/").filter(Boolean).pop() : undefined) ||
+    p.name ||
     ""
   ).trim();
 

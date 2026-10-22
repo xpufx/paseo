@@ -174,10 +174,10 @@ describe("authoritative agent project resolution (#530)", () => {
       path.join(projectsDir, "projects.json"),
       JSON.stringify([
         {
-          projectId: "prj_paseo",
+          projectId: "git-root:5d9c889a1c69e5bcb33cf338269ddf6fc24c6581",
           rootPath: "/var/test-home/code/paseo",
           displayName: "paseo",
-          projectKey: "remote:forge.mrs.uppidi.com:222/xpufx-org/paseo",
+          projectKey: "git-root:5d9c889a1c69e5bcb33cf338269ddf6fc24c6581",
         },
         {
           projectId: "prj_plain",
@@ -192,7 +192,7 @@ describe("authoritative agent project resolution (#530)", () => {
       JSON.stringify([
         {
           workspaceId: "wks_worktree",
-          projectId: "prj_paseo",
+          projectId: "git-root:5d9c889a1c69e5bcb33cf338269ddf6fc24c6581",
           cwd: "/var/test-home/.paseo/worktrees/2h0dw6vb/fix-530",
           mainRepoRoot: "/var/test-home/code/paseo",
           isPaseoOwnedWorktree: true,
@@ -208,8 +208,8 @@ describe("authoritative agent project resolution (#530)", () => {
     process.env.HOME = tempHome;
     try {
       const map = getWorkspaceProjectMap({ forceRefresh: true });
-      assert.equal(map["wks_worktree"], "forge.mrs.uppidi.com/xpufx-org/paseo");
-      assert.equal(map["wks_plain"], "meta");
+      assert.equal(map["wks_worktree"], "git-root:5d9c889a1c69e5bcb33cf338269ddf6fc24c6581");
+      assert.equal(map["wks_plain"], undefined);
     } finally {
       process.env.HOME = originalHome;
       setWorkspaceProjectMapForTest(null);

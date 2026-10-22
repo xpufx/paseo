@@ -15,6 +15,10 @@ export function isRepoMatching(targetRepo: string, candidateRepo: string): boole
   const c = candidateRepo.trim().toLowerCase().replace(/\.git$/, "");
   if (t === c) return true;
 
+  if (t.startsWith("git-root:") || t.startsWith("non-git:") || c.startsWith("git-root:") || c.startsWith("non-git:")) {
+    return t === c;
+  }
+
   const tParts = t.split("/").filter(Boolean);
   const cParts = c.split("/").filter(Boolean);
 

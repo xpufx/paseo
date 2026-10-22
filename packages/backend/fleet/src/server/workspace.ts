@@ -6,6 +6,7 @@ import { basename, join, resolve } from "node:path";
 import { candidateRepoKeys, canonicalRepoKey, normalizeRepoKey } from "../client/types.js";
 
 const execFileAsync = promisify(execFile);
+const gitRootCommitCache = new Map<string, string | null>();
 
 /**
  * Resolves the root commit SHA of a git repository using deterministic sorting:
@@ -13,16 +14,25 @@ const execFileAsync = promisify(execFile);
  */
 export async function resolveGitRootCommit(cwd: string): Promise<string | null> {
   if (!cwd || typeof cwd !== "string") return null;
+  const trimmed = cwd.trim();
+  if (gitRootCommitCache.has(trimmed)) {
+    return gitRootCommitCache.get(trimmed)!;
+  }
+  if (!existsSync(trimmed)) {
+    gitRootCommitCache.set(trimmed, null);
+    return null;
+  }
   try {
     const { stdout } = await execFileAsync("git", ["rev-list", "--max-parents=0", "HEAD"], {
-      cwd,
+      cwd: trimmed,
       encoding: "utf8",
     });
     const lines = stdout.trim().split("\n").map((s) => s.trim()).filter(Boolean);
-    if (lines.length === 0) return null;
-    lines.sort();
-    return lines[0];
+    const result = lines.length > 0 ? lines.sort()[0] : null;
+    gitRootCommitCache.set(trimmed, result);
+    return result;
   } catch {
+    gitRootCommitCache.set(trimmed, null);
     return null;
   }
 }
@@ -30,17 +40,26 @@ export async function resolveGitRootCommit(cwd: string): Promise<string | null> 
 /** Synchronous variant of resolveGitRootCommit. */
 export function resolveGitRootCommitSync(cwd: string): string | null {
   if (!cwd || typeof cwd !== "string") return null;
+  const trimmed = cwd.trim();
+  if (gitRootCommitCache.has(trimmed)) {
+    return gitRootCommitCache.get(trimmed)!;
+  }
+  if (!existsSync(trimmed)) {
+    gitRootCommitCache.set(trimmed, null);
+    return null;
+  }
   try {
     const stdout = execFileSync("git", ["rev-list", "--max-parents=0", "HEAD"], {
-      cwd,
+      cwd: trimmed,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
     });
     const lines = stdout.trim().split("\n").map((s) => s.trim()).filter(Boolean);
-    if (lines.length === 0) return null;
-    lines.sort();
-    return lines[0];
+    const result = lines.length > 0 ? lines.sort()[0] : null;
+    gitRootCommitCache.set(trimmed, result);
+    return result;
   } catch {
+    gitRootCommitCache.set(trimmed, null);
     return null;
   }
 }
@@ -238,11 +257,24 @@ function workspaceCandidateKeys(workspace: WorkspaceRecord, project?: ProjectRec
   add(workspace.mainRepoRoot);
   add(project?.rootPath);
   add(workspace.cwd);
-  add(workspace.displayName);
   add(project?.displayName);
-  if (workspace.cwd) add(basename(workspace.cwd));
+
+  const candidateDirs = [
+    workspace.mainRepoRoot,
+    workspace.worktreeRoot,
+    project?.rootPath,
+    workspace.cwd,
+  ];
+  for (const dir of candidateDirs) {
+    if (dir && typeof dir === "string" && existsSync(dir)) {
+      const pKey = canonicalProjectKey(dir);
+      if (pKey) keys.add(pKey.toLowerCase());
+    }
+  }
+
   if (workspace.mainRepoRoot) add(basename(workspace.mainRepoRoot));
   if (project?.rootPath) add(basename(project.rootPath));
+  if (!isWorktreeRecord(workspace) && workspace.cwd) add(basename(workspace.cwd));
 
   return [...keys];
 }

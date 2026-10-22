@@ -809,8 +809,13 @@ export interface BuildProjectGroupsResult {
 export function isRepoMatching(repoA?: string, repoB?: string): boolean {
   if (!repoA || !repoB) return false;
   if (repoA.toLowerCase() === repoB.toLowerCase()) return true;
-  const cleanA = repoA.toLowerCase().replace(/^https?:\/\//, "").replace(/\.git$/, "").replace(/^git@[^:]+:/, "");
-  const cleanB = repoB.toLowerCase().replace(/^https?:\/\//, "").replace(/\.git$/, "").replace(/^git@[^:]+:/, "");
+  const a = repoA.trim().toLowerCase();
+  const b = repoB.trim().toLowerCase();
+  if (a.startsWith("git-root:") || a.startsWith("non-git:") || b.startsWith("git-root:") || b.startsWith("non-git:")) {
+    return a === b;
+  }
+  const cleanA = a.replace(/^https?:\/\//, "").replace(/\.git$/, "").replace(/^git@[^:]+:/, "");
+  const cleanB = b.replace(/^https?:\/\//, "").replace(/\.git$/, "").replace(/^git@[^:]+:/, "");
   if (cleanA === cleanB) return true;
   if (cleanA.endsWith(`/${cleanB}`) || cleanB.endsWith(`/${cleanA}`)) return true;
   return false;

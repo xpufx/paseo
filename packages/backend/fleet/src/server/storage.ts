@@ -3,7 +3,12 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { RawAgentRecord, WorkspaceProjectMap } from "../shared/classify.js";
 import { normalizeRepoKey, normalizeProjectName } from "../client/types.js";
-import type { WorkspaceRecord, ProjectRecord } from "./workspace.js";
+import {
+  type WorkspaceRecord,
+  type ProjectRecord,
+  canonicalProjectKey,
+  resolveGitRootCommitSync,
+} from "./workspace.js";
 
 export function resolvePaseoHome(overrideHome?: string): string {
   if (overrideHome && overrideHome.trim()) {
@@ -38,8 +43,9 @@ export function parseProjectKey(key?: string | null): string | undefined {
 }
 
 /**
- * Builds a WorkspaceProjectMap purely from in-memory workspace and project records
- * without touching the filesystem.
+ * Builds a WorkspaceProjectMap purely from workspace and project records.
+ * Adheres strictly to the single-key doctrine: project identity is `git-root:<sha>`.
+ * Zero fallbacks to workspace display names, project display names, or path basenames.
  */
 export function buildWorkspaceProjectMapFromRegistry(
   workspaces: readonly WorkspaceRecord[] | null | undefined,
@@ -56,18 +62,38 @@ export function buildWorkspaceProjectMapFromRegistry(
   }
 
   for (const workspace of workspaces) {
-    if (!workspace?.workspaceId) continue;
+    if (!workspace?.workspaceId || workspace.archivedAt) continue;
     const project = workspace.projectId ? projectsById.get(workspace.projectId) : undefined;
-    const validProjectKey = project?.projectKey;
-    const repo =
-      parseProjectKey(validProjectKey) ||
-      normalizeRepoKey(validProjectKey) ||
-      project?.displayName?.trim() ||
-      workspace.displayName?.trim() ||
-      (workspace.mainRepoRoot || project?.rootPath || workspace.worktreeRoot || workspace.cwd)?.split("/").filter(Boolean).pop() ||
-      project?.projectId ||
-      workspace.projectId;
-    if (repo) map[workspace.workspaceId] = normalizeProjectName(repo);
+
+    // 1. Direct canonical key if already git-root:<sha> or non-git:<hash>
+    let key: string | null = null;
+    const candidateKeys = [project?.projectKey, project?.projectId, workspace.projectId];
+    for (const cand of candidateKeys) {
+      if (typeof cand === "string" && (cand.startsWith("git-root:") || cand.startsWith("non-git:"))) {
+        key = cand.trim();
+        break;
+      }
+    }
+
+    // 2. Otherwise derive canonical git-root SHA from the checkout or worktree directory
+    if (!key) {
+      const targetDir =
+        workspace.mainRepoRoot ||
+        workspace.worktreeRoot ||
+        project?.rootPath ||
+        workspace.cwd;
+      if (targetDir && typeof targetDir === "string") {
+        const rootCommit = resolveGitRootCommitSync(targetDir.trim());
+        if (rootCommit) {
+          key = `git-root:${rootCommit}`;
+        }
+      }
+    }
+
+    // Strict: only canonical keys are mapped; zero fallbacks to display names or path basenames
+    if (key) {
+      map[workspace.workspaceId] = key;
+    }
   }
 
   return map;
@@ -88,20 +114,18 @@ export function readWorkspaceProjectMap(options?: {
     return workspaceProjectCache.map;
   }
 
-  const map: WorkspaceProjectMap = {};
+  let map: WorkspaceProjectMap = {};
   const baseDir = resolvePaseoHome(options?.home);
 
   try {
-    const projectsById = new Map<string, any>();
     const projectsPath = existsSync(join(baseDir, "projects", "projects.json"))
       ? join(baseDir, "projects", "projects.json")
       : join(baseDir, "projects.json");
+    let parsedProjects: ProjectRecord[] = [];
     if (existsSync(projectsPath)) {
       const parsed = JSON.parse(readFileSync(projectsPath, "utf-8"));
       if (Array.isArray(parsed)) {
-        for (const project of parsed) {
-          if (project?.projectId) projectsById.set(project.projectId, project);
-        }
+        parsedProjects = parsed;
       }
     }
 
@@ -111,20 +135,7 @@ export function readWorkspaceProjectMap(options?: {
     if (existsSync(workspacesPath)) {
       const parsed = JSON.parse(readFileSync(workspacesPath, "utf-8"));
       if (Array.isArray(parsed)) {
-        for (const workspace of parsed as WorkspaceRecord[]) {
-          if (!workspace?.workspaceId) continue;
-          const project = workspace.projectId ? projectsById.get(workspace.projectId) : undefined;
-          const validProjectKey = project?.projectKey;
-          const repo =
-            parseProjectKey(validProjectKey) ||
-            normalizeRepoKey(validProjectKey) ||
-            project?.displayName?.trim() ||
-            workspace.displayName?.trim() ||
-            (workspace.mainRepoRoot || project?.rootPath || workspace.worktreeRoot || workspace.cwd)?.split("/").filter(Boolean).pop() ||
-            project?.projectId ||
-            workspace.projectId;
-          if (repo) map[workspace.workspaceId] = normalizeProjectName(repo);
-        }
+        map = buildWorkspaceProjectMapFromRegistry(parsed, parsedProjects);
       }
     }
   } catch {

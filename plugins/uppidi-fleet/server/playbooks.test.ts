@@ -490,8 +490,8 @@ describe("deterministic stage transition guards & artifact enforcement (#1404)",
     assert.equal(isAuthorizedOperator("okcode"), false);
     assert.equal(isAuthorizedOperator("okcode", ["okcode"]), true);
     assert.equal(isAuthorizedOperator("OKCODE", ["okcode"]), true);
-    assert.equal(isAuthorizedOperator("oktay"), false);
-    assert.equal(isAuthorizedOperator("oktay", ["oktay"]), true);
+    assert.equal(isAuthorizedOperator("operator-1"), false);
+    assert.equal(isAuthorizedOperator("operator-1", ["operator-1"]), true);
     assert.equal(isAuthorizedOperator("xpufx"), false);
     assert.equal(isAuthorizedOperator("autonomous-agent"), false);
     assert.equal(isAuthorizedOperator("random-user"), false);

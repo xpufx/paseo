@@ -316,77 +316,76 @@ describe("@xpufx/backend-fleet", () => {
         [
           {
             workspaceId: "ws-99",
-            projectId: "p-99",
+            projectId: "git-root:abc1234567890abcdef1234567890abcdef12",
             cwd: "/repos/app",
             displayName: "app-workspace",
           },
         ],
         [
           {
-            projectId: "p-99",
+            projectId: "git-root:abc1234567890abcdef1234567890abcdef12",
             displayName: "my-org/my-app",
-            projectKey: "remote:forge.mrs.uppidi.com/my-org/my-app",
+            projectKey: "git-root:abc1234567890abcdef1234567890abcdef12",
           },
         ]
       );
-      expect(map["ws-99"]).toBe("forge.mrs.uppidi.com/my-org/my-app");
+      expect(map["ws-99"]).toBe("git-root:abc1234567890abcdef1234567890abcdef12");
     });
 
-    it("maps workspace to canonical git-root project and human-readable display name", () => {
+    it("maps workspace to canonical git-root project key from git repository directory", () => {
+      const gitRoot = resolveGitRootCommitSync(process.cwd());
       const map = buildWorkspaceProjectMapFromRegistry(
         [
           {
             workspaceId: "ws-1",
-            projectId: "git-root:5d9c889a1c69e5bcb33cf338269ddf6fc24c6581",
-            cwd: "/home/user/code/paseo",
+            cwd: process.cwd(),
             displayName: "paseo-workspace",
           },
         ],
-        [
-          {
-            projectId: "git-root:5d9c889a1c69e5bcb33cf338269ddf6fc24c6581",
-            displayName: "xpufx-org/paseo",
-            projectKey: "remote:forge.mrs.uppidi.com/xpufx-org/paseo",
-          },
-        ]
+        []
       );
-      expect(map["ws-1"]).toBe("forge.mrs.uppidi.com/xpufx-org/paseo");
+      expect(map["ws-1"]).toBe(`git-root:${gitRoot}`);
     });
 
-    it("resolves workspace project mapping from display name or rootPath directly", () => {
+    it("does not fall back to workspace displayName, project displayName, or path basename", () => {
       const mapFromWs = buildWorkspaceProjectMapFromRegistry(
         [
           {
             workspaceId: "ws-2",
             projectId: "git-root:abc1234567890abcdef1234567890abcdef12",
-            cwd: "/repos/my-repo",
+            cwd: "/non-existent/directory",
             displayName: "my-custom-display",
           },
         ],
         [
           {
             projectId: "git-root:abc1234567890abcdef1234567890abcdef12",
+            displayName: "xpufx-org/repo",
           },
         ]
       );
-      expect(mapFromWs["ws-2"]).toBe("my-custom-display");
+      // Explicit git-root key is preserved, displayName is ignored
+      expect(mapFromWs["ws-2"]).toBe("git-root:abc1234567890abcdef1234567890abcdef12");
 
-      const mapFromRoot = buildWorkspaceProjectMapFromRegistry(
+      const mapFromUnknown = buildWorkspaceProjectMapFromRegistry(
         [
           {
             workspaceId: "ws-3",
-            projectId: "git-root:def1234567890abcdef1234567890abcdef12",
-            cwd: "/repos/my-repo",
+            projectId: "prj_opaque_legacy",
+            cwd: "/non-existent/directory",
+            displayName: "phantom-workspace-name",
           },
         ],
         [
           {
-            projectId: "git-root:def1234567890abcdef1234567890abcdef12",
-            rootPath: "/repos/my-repo",
+            projectId: "prj_opaque_legacy",
+            displayName: "opaque-display",
+            rootPath: "/non-existent/directory",
           },
         ]
       );
-      expect(mapFromRoot["ws-3"]).toBe("my-repo");
+      // Zero fallbacks: if not a git repo and no canonical key, no entry in map
+      expect(mapFromUnknown["ws-3"]).toBeUndefined();
     });
 
     it("reads roster purely via daemon SDK without disk scraping", async () => {

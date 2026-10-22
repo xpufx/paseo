@@ -2420,7 +2420,16 @@ export function ProjectGroupCard({
                 />
               )}
               {(() => {
-                const display = formatProjectDisplay(group.projectName);
+                const repAgent =
+                  group.orchestrators[0]?.agent ||
+                  group.unparentedWorkers[0]?.agent ||
+                  group.allAgents[0];
+                const display = formatProjectDisplay({
+                  projectKey: group.projectName,
+                  name: group.projectName,
+                  repo: repAgent?.labels?.["repo"] || repAgent?.attributedWork?.repo,
+                  cwd: repAgent?.cwd,
+                });
                 return (
                   <>
                     <Icon name="FolderGit2" size={16} color={colors.accent} />
