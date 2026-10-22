@@ -125,7 +125,7 @@ export function normalizeRawAgent(
   const metrics = normalizeAgentMetrics(raw);
 
   const project = extractAgentProject(
-    raw,
+    { ...raw, attributedWork },
     undefined,
     projectMap,
   );

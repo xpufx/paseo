@@ -113,7 +113,7 @@ describe("authoritative agent project resolution (#530)", () => {
     }
   });
 
-  it("prefers canonical workspace mapping over labels and inherits from parent hierarchy", () => {
+  it("prefers explicit labels over canonical workspace mapping and inherits from parent hierarchy", () => {
     setWorkspaceProjectMapForTest({ wks_platform: "xpufx-org/platform" });
     try {
       const labeled = normalizeRawAgent({
@@ -123,7 +123,7 @@ describe("authoritative agent project resolution (#530)", () => {
         workspaceId: "wks_platform",
         labels: { repo: "xpufx-org/paseo" },
       });
-      assert.equal(labeled.project, "forge.mrs.uppidi.com/xpufx-org/platform");
+      assert.equal(labeled.project, "forge.mrs.uppidi.com/xpufx-org/paseo");
 
       const orchestrator = normalizeRawAgent(
         {

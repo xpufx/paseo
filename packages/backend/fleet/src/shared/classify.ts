@@ -174,13 +174,18 @@ export function extractAgentProject(
     return normalizeProjectName(agent.project);
   }
 
+  // Explicit spawn labels / attributed work take precedence over generic
+  // workspace -> project map lookups (#1505).
+  if (agent.labels?.["repo"] && agent.labels["repo"].trim()) return normalizeProjectName(agent.labels["repo"]);
+  if (agent.labels?.["project"] && agent.labels["project"].trim()) return normalizeProjectName(agent.labels["project"]);
+  if (agent.attributedWork?.repo && String(agent.attributedWork.repo).trim()) {
+    return normalizeProjectName(String(agent.attributedWork.repo));
+  }
+
   if (agent.workspaceId && workspaceProjectMap) {
     const mapped = workspaceProjectMap[agent.workspaceId];
     if (mapped && mapped.trim()) return normalizeProjectName(mapped);
   }
-
-  if (agent.labels?.["repo"] && agent.labels["repo"].trim()) return normalizeProjectName(agent.labels["repo"]);
-  if (agent.labels?.["project"] && agent.labels["project"].trim()) return normalizeProjectName(agent.labels["project"]);
 
   if (parentProject && parentProject.trim() && parentProject.trim() !== DEFAULT_PROJECT) {
     return normalizeProjectName(parentProject);

@@ -10,6 +10,8 @@ import type {
   DeterministicAgentState,
 } from "./contracts.js";
 import { extractAgentProject, extractAgentWorktree, agentRequiresAttention } from "./contracts.js";
+import { normalizeRepoKey, canonicalRepoKey } from "./repo-identity.js";
+
 
 // --- Agent Status Lights (#410) ---
 
@@ -803,17 +805,243 @@ export interface BuildProjectGroupsResult {
   detachedGroups: ProjectAgentGroup[];
 }
 
+function __fs(): any {
+  try { return (process as any)?.getBuiltinModule?.("node:fs") ?? null; } catch { return null; }
+}
+function __cp(): any {
+  try { return (process as any)?.getBuiltinModule?.("node:child_process") ?? null; } catch { return null; }
+}
+function __path(): any {
+  try { return (process as any)?.getBuiltinModule?.("node:path") ?? null; } catch { return null; }
+}
+
+function pluginGitRootSha(dir: string | null | undefined): string | null {
+  const fs = __fs();
+  if (!dir || typeof dir !== "string") return null;
+  const trimmed = dir.trim();
+  if (!trimmed || !fs?.existsSync?.(trimmed)) return null;
+  try {
+    const cp = __cp();
+    const out = cp.execFileSync("git", ["rev-list", "--max-parents=0", "HEAD"], { cwd: trimmed, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+    const lines = String(out).trim().split("\n").map((x: string) => x.trim()).filter(Boolean);
+    return lines.length > 0 ? lines.sort()[0] : null;
+  } catch { return null; }
+}
+
+function pluginGitRemoteSlug(dir: string | null | undefined): string | null {
+  const fs = __fs();
+  const cp = __cp();
+  if (!dir || typeof dir !== "string") return null;
+  const trimmed = dir.trim();
+  if (!trimmed || !fs?.existsSync?.(trimmed)) return null;
+  try {
+    const url = cp.execFileSync("git", ["remote", "get-url", "origin"], {
+      cwd: trimmed,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    if (!url) return null;
+    return (canonicalRepoKey(url) ?? normalizeRepoKey(url))?.toLowerCase() ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function pluginSlugMatches(a: string | null | undefined, b: string | null | undefined): boolean {
+  if (!a || !b) return false;
+  const ca = (canonicalRepoKey(a) ?? normalizeRepoKey(a) ?? a).toLowerCase();
+  const cb = (canonicalRepoKey(b) ?? normalizeRepoKey(b) ?? b).toLowerCase();
+  if (ca && cb) {
+    if (ca === cb) return true;
+    if (ca.endsWith(`/${cb}`) || cb.endsWith(`/${ca}`)) return true;
+    const caBase = ca.split("/").filter(Boolean).pop();
+    const cbBase = cb.split("/").filter(Boolean).pop();
+    if (caBase && caBase === cbBase) return true;
+  }
+  return a.trim().toLowerCase() === b.trim().toLowerCase();
+}
+
+function pluginResolveSlugToSha(slug: string): string | null {
+  const fs = __fs();
+  const pathMod = __path();
+  const candidates = new Set<string>();
+  const trimmed = slug.trim();
+  if (fs?.existsSync?.(trimmed)) candidates.add(trimmed);
+  try {
+    const home = (process as any)?.env?.HOME || (process as any)?.env?.REAL_HOME;
+    const base = trimmed.split("/").filter(Boolean).pop();
+    if (home && base) {
+      const pm = __path();
+      candidates.add(pm ? pm.join(home, "code", base) : `${home}/code/${base}`);
+    }
+  } catch { /* ignore */ }
+  const base = trimmed.split("/").filter(Boolean).pop();
+  if (base) {
+    const home = (process as any)?.env?.HOME || (process as any)?.env?.REAL_HOME;
+    if (home && pathMod) candidates.add(pathMod.join(home, "code", base));
+  }
+
+  for (const dir of candidates) {
+    const sha = pluginGitRootSha(dir);
+    if (!sha) continue;
+    const remote = pluginGitRemoteSlug(dir);
+    if (remote) {
+      if (pluginSlugMatches(remote, trimmed)) return sha;
+    } else {
+      const dirBase = (pathMod ? pathMod.basename(dir) : String(dir).split("/").pop() || "").toLowerCase();
+      if (base && dirBase === base.toLowerCase()) return sha;
+    }
+  }
+
+  const cwdRemote = pluginGitRemoteSlug((process as any)?.cwd?.());
+  if (cwdRemote && pluginSlugMatches(cwdRemote, trimmed)) {
+    const sha = pluginGitRootSha((process as any)?.cwd?.());
+    if (sha) return sha;
+  }
+  return null;
+}
+
+function pluginResolveShaToSlug(sha: string): string | null {
+  const fs = __fs();
+  const pathMod = __path();
+  const target = sha.trim().toLowerCase();
+  const cwdSha = pluginGitRootSha((process as any)?.cwd?.());
+  if (cwdSha && cwdSha.toLowerCase() === target) {
+    const remote = pluginGitRemoteSlug((process as any)?.cwd?.());
+    if (remote) return remote;
+  }
+  const home = (process as any)?.env?.HOME || (process as any)?.env?.REAL_HOME;
+  if (home && pathMod && fs) {
+    const codeDir = pathMod.join(home, "code");
+    if (fs.existsSync(codeDir)) {
+      try {
+        for (const entry of fs.readdirSync(codeDir)) {
+          const dir = pathMod.join(codeDir, entry);
+          const s = pluginGitRootSha(dir);
+          if (s && s.toLowerCase() === target) {
+            const remote = pluginGitRemoteSlug(dir);
+            if (remote) return remote;
+          }
+        }
+      } catch { /* ignore */ }
+    }
+  }
+  return null;
+}
+
+function pluginWorkspaceBridge(a: string, b: string, workspaces: any[], projects: any[]): boolean {
+  if (!Array.isArray(workspaces) || workspaces.length === 0) return false;
+  const projectsById = new Map<string, any>();
+  for (const p of projects ?? []) {
+    if (p?.projectId) projectsById.set(p.projectId, p);
+  }
+  const keysFor = (ws: any): Set<string> => {
+    const keys = new Set<string>();
+    const add = (v: any) => {
+      if (!v || typeof v !== "string") return;
+      const t = v.trim();
+      if (!t) return;
+      keys.add(t.toLowerCase());
+      const n = normalizeRepoKey(t);
+      if (n) keys.add(n.toLowerCase());
+      const c = canonicalRepoKey(t);
+      if (c) keys.add(c.toLowerCase());
+    };
+    add(ws.projectId);
+    add(ws.projectKey);
+    add(ws.repo);
+    const proj = ws.projectId ? projectsById.get(ws.projectId) : undefined;
+    add(proj?.projectId);
+    add(proj?.projectKey);
+    add(ws.mainRepoRoot);
+    add(proj?.rootPath);
+    add(ws.cwd);
+    add(proj?.displayName);
+    const dirs = [ws.mainRepoRoot, ws.worktreeRoot, proj?.rootPath, ws.cwd];
+    const fs = __fs();
+    for (const dir of dirs) {
+      if (dir && typeof dir === "string" && fs?.existsSync?.(dir)) {
+        try {
+          const pKey = resolveCanonicalProjectKeySync(dir);
+          if (pKey) keys.add(String(pKey).toLowerCase());
+        } catch { /* ignore */ }
+      }
+    }
+    if (ws.mainRepoRoot) add((ws.mainRepoRoot.split ? ws.mainRepoRoot.split("/").pop() : null));
+    if (proj?.rootPath) add((proj.rootPath.split ? proj.rootPath.split("/").pop() : null));
+    return keys;
+  };
+
+  const al = a.trim().toLowerCase();
+  const bl = b.trim().toLowerCase();
+  for (const ws of workspaces) {
+    if (!ws?.workspaceId) continue;
+    const keys = keysFor(ws);
+    if (keys.has(al) && keys.has(bl)) return true;
+  }
+  return false;
+}
+
+// resolveCanonicalProjectKey sync helper
+function resolveCanonicalProjectKeySync(dir: string): string | null {
+  const sha = pluginGitRootSha(dir);
+  if (sha) return `git-root:${sha}`;
+  return null;
+}
+
 /**
  * Checks if two repository names or keys match (normalizing protocol/host/git suffixes).
  */
-export function isRepoMatching(repoA?: string, repoB?: string): boolean {
+export function isRepoMatching(repoA?: string, repoB?: string, context?: any): boolean {
   if (!repoA || !repoB) return false;
-  if (repoA.toLowerCase() === repoB.toLowerCase()) return true;
-  const a = repoA.trim().toLowerCase();
-  const b = repoB.trim().toLowerCase();
-  if (a.startsWith("git-root:") || a.startsWith("non-git:") || b.startsWith("git-root:") || b.startsWith("non-git:")) {
-    return a === b;
+  const aRaw = String(repoA).trim();
+  const bRaw = String(repoB).trim();
+  if (!aRaw || !bRaw) return false;
+  if (aRaw.toLowerCase() === bRaw.toLowerCase()) return true;
+
+  // context normalization
+  let workspaces: any[] | undefined;
+  let projects: any[] | undefined;
+  if (Array.isArray(context)) {
+    if (context.length === 0) {
+      // noop
+    } else if (typeof context[0] === "string") {
+      // known repos; no workspace bridge
+    } else {
+      workspaces = context;
+    }
+  } else if (context && typeof context === "object") {
+    workspaces = context.workspacesData ?? context.workspaces;
+    projects = context.projectsData ?? context.projects;
   }
+
+  if (workspaces && workspaces.length > 0) {
+    if (pluginWorkspaceBridge(aRaw, bRaw, workspaces, projects ?? [])) return true;
+  }
+
+  const a = aRaw.toLowerCase();
+  const b = bRaw.toLowerCase();
+  const aSent = a.startsWith("git-root:") || a.startsWith("non-git:");
+  const bSent = b.startsWith("git-root:") || b.startsWith("non-git:");
+
+  if (aSent || bSent) {
+    if (aSent && bSent) return a === b;
+    if (a.startsWith("non-git:") || b.startsWith("non-git:")) return false;
+
+    const sentinel = aSent ? a : b;
+    const slug = aSent ? bRaw : aRaw;
+    const sha = sentinel.startsWith("git-root:") ? sentinel.slice("git-root:".length).trim() : "";
+
+    if (sha) {
+      const slugSha = pluginResolveSlugToSha(slug);
+      if (slugSha && slugSha.toLowerCase() === sha) return true;
+
+      const shaSlug = pluginResolveShaToSlug(sha);
+      if (shaSlug && pluginSlugMatches(shaSlug, slug)) return true;
+    }
+    return false;
+  }
+
   const cleanA = a.replace(/^https?:\/\//, "").replace(/\.git$/, "").replace(/^git@[^:]+:/, "");
   const cleanB = b.replace(/^https?:\/\//, "").replace(/\.git$/, "").replace(/^git@[^:]+:/, "");
   if (cleanA === cleanB) return true;

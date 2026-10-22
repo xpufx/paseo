@@ -536,14 +536,14 @@ describe("uppidi-fleet shared contracts", () => {
       "forge.mrs.uppidi.com/xpufx-org/paseo"
     );
 
-    // 5. Workspace mapping takes precedence over labels
+    // 5. Explicit labels take precedence over workspace mapping (#1505)
     assert.equal(
       extractAgentProject(
         { workspaceId: "wks_abc", labels: { repo: "xpufx-org/platform" } },
         undefined,
         { wks_abc: "xpufx-org/paseo" }
       ),
-      "forge.mrs.uppidi.com/xpufx-org/paseo"
+      "forge.mrs.uppidi.com/xpufx-org/platform"
     );
 
     // 6. Labels used when the workspace is not in the map
