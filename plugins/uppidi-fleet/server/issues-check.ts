@@ -30,6 +30,8 @@ import {
   LABEL_ALIASES,
   canonicalLabel,
 } from "@xpufx/backend-tickets/shared";
+import { resolveForgeToken as resolveBackendForgeToken } from "@xpufx/backend-tickets/server";
+import { forgejoApiGet, forgejoToken } from "./forgejo-api.js";
 import type { PlaybookStageName, PlaybookProfile } from "../shared/contracts.js";
 import {
   extractStageFromLabels,
@@ -1110,31 +1112,130 @@ export type TeaxRunner = (args: string[]) => Promise<{ code: number; stdout: str
  * Unlike the original, a failing issues query is an error, not an empty board:
  * that conflation was the silent degradation #733 removes.
  */
-export function createDefaultIssuesCheckIo(runner: TeaxRunner = teaxRun): IssuesCheckIo {
+async function resolveIssuesCheckToken(hostname: string): Promise<string | null> {
+  let pluginToken: string | null = null;
+  try {
+    const token = await forgejoToken(hostname);
+    if (token && token.trim()) pluginToken = token.trim();
+  } catch {
+    // fall through
+  }
+  let backendToken: string | undefined;
+  try {
+    backendToken = await resolveBackendForgeToken(hostname);
+  } catch {
+    // fall through
+  }
+  if (pluginToken) return pluginToken;
+  if (backendToken && backendToken.trim()) return backendToken.trim();
+  const envToken = (process.env.FORGEJO_TOKEN ?? "").trim();
+  return envToken || null;
+}
+
+/**
+ * Default IO: direct Forgejo HTTP API transport (no `teax` subprocess) for
+ * open issues and issue comments, plus `~/.cache` for board state.
+ *
+ * A failing issues query is an error, not an empty board: that conflation was
+ * the silent degradation #733 removes.
+ *
+ * Backwards-compatible with the legacy `TeaxRunner` injection seam: when a
+ * runner function is supplied it is used as before (teax transport), so older
+ * callers and tests keep working. New callers omit it and get the fetch path.
+ */
+export function createDefaultIssuesCheckIo(runner?: TeaxRunner): IssuesCheckIo {
+  if (typeof runner === "function") {
+    // Legacy teax transport (kept for backwards compatibility).
+    return {
+      async getOpenIssues(hostname, repo) {
+        const allIssues: ForgejoIssue[] = [];
+        const limit = 50;
+        const maxPages = 20;
+
+        for (let page = 1; page <= maxPages; page++) {
+          const res = await runner([
+            "api",
+            `repos/${repo}/issues?state=open&sort=updated&order=desc&limit=${limit}&page=${page}`,
+            "--hostname",
+            hostname,
+          ]);
+          if (res.code !== 0) {
+            return {
+              ok: false,
+              error: `teax issues query failed on page ${page} (rc=${res.code}): ${res.stderr.trim() || "no output"}`,
+            };
+          }
+          const out = res.stdout.trim();
+          if (!out) break;
+          const pageIssues = parseJsonList<ForgejoIssue>(out);
+          if (!pageIssues) {
+            return { ok: false, error: `teax issues query returned non-list output on page ${page}` };
+          }
+          if (pageIssues.length === 0) break;
+          allIssues.push(...pageIssues);
+          if (pageIssues.length < limit) break;
+        }
+
+        return { ok: true, issues: allIssues };
+      },
+
+      async getLatestComments(hostname, repo, issueNumber, count = 3) {
+        const res = await runner(["api", `repos/${repo}/issues/${issueNumber}/comments`, "--hostname", hostname]);
+        if (res.code !== 0) return [];
+        const out = res.stdout.trim();
+        if (!out) return [];
+        const data = parseJsonList<ForgejoComment>(out);
+        return data ? data.slice(-count) : [];
+      },
+
+      async getIssueComments(hostname, repo, issueNumber) {
+        const res = await runner(["api", `repos/${repo}/issues/${issueNumber}/comments`, "--hostname", hostname]);
+        if (res.code !== 0) return [];
+        const out = res.stdout.trim();
+        if (!out) return [];
+        return parseJsonList<ForgejoComment>(out) ?? [];
+      },
+
+      runStaleWipCommand,
+
+      async loadCache(repo) {
+        const file = cacheFilePath(repo);
+        if (!existsSync(file)) return {};
+        try {
+          return JSON.parse(readFileSync(file, "utf8"));
+        } catch {
+          return {};
+        }
+      },
+
+      async saveCache(state, repo) {
+        const file = cacheFilePath(repo);
+        mkdirSync(dirname(file), { recursive: true });
+        writeFileSync(file, JSON.stringify(state, null, 2));
+      },
+    };
+  }
+
+  // Fetch transport.
   return {
     async getOpenIssues(hostname, repo) {
       const allIssues: ForgejoIssue[] = [];
       const limit = 50;
       const maxPages = 20;
+      const token = await resolveIssuesCheckToken(hostname);
 
       for (let page = 1; page <= maxPages; page++) {
-        const res = await runner([
-          "api",
-          `repos/${repo}/issues?state=open&sort=updated&order=desc&limit=${limit}&page=${page}`,
-          "--hostname",
-          hostname,
-        ]);
-        if (res.code !== 0) {
+        const path = `/api/v1/repos/${repo}/issues?state=open&sort=updated&order=desc&limit=${limit}&page=${page}`;
+        const res = await forgejoApiGet<ForgejoIssue[]>(path, { host: hostname, token });
+        if (res.outcome !== "ok") {
           return {
             ok: false,
-            error: `teax issues query failed on page ${page} (rc=${res.code}): ${res.stderr.trim() || "no output"}`,
+            error: `issues query failed on page ${page}: ${res.error}`,
           };
         }
-        const out = res.stdout.trim();
-        if (!out) break;
-        const pageIssues = parseJsonList<ForgejoIssue>(out);
+        const pageIssues = Array.isArray(res.data) ? res.data : null;
         if (!pageIssues) {
-          return { ok: false, error: `teax issues query returned non-list output on page ${page}` };
+          return { ok: false, error: `issues query returned non-list output on page ${page}` };
         }
         if (pageIssues.length === 0) break;
         allIssues.push(...pageIssues);
@@ -1144,23 +1245,23 @@ export function createDefaultIssuesCheckIo(runner: TeaxRunner = teaxRun): Issues
       return { ok: true, issues: allIssues };
     },
 
-    // Comment reads stay best-effort ([] on failure), as in the original:
-    // they only gate feedback detection, never the whole run.
     async getLatestComments(hostname, repo, issueNumber, count = 3) {
-      const res = await teaxRun(["api", `repos/${repo}/issues/${issueNumber}/comments`, "--hostname", hostname]);
-      if (res.code !== 0) return [];
-      const out = res.stdout.trim();
-      if (!out) return [];
-      const data = parseJsonList<ForgejoComment>(out);
-      return data ? data.slice(-count) : [];
+      const token = await resolveIssuesCheckToken(hostname);
+      const path = `/api/v1/repos/${repo}/issues/${issueNumber}/comments`;
+      const res = await forgejoApiGet<ForgejoComment[]>(path, { host: hostname, token });
+      if (res.outcome !== "ok") return [];
+      const data = Array.isArray(res.data) ? res.data : null;
+      if (!data) return [];
+      return data.slice(-count);
     },
 
     async getIssueComments(hostname, repo, issueNumber) {
-      const res = await teaxRun(["api", `repos/${repo}/issues/${issueNumber}/comments`, "--hostname", hostname]);
-      if (res.code !== 0) return [];
-      const out = res.stdout.trim();
-      if (!out) return [];
-      return parseJsonList<ForgejoComment>(out) ?? [];
+      const token = await resolveIssuesCheckToken(hostname);
+      const path = `/api/v1/repos/${repo}/issues/${issueNumber}/comments`;
+      const res = await forgejoApiGet<ForgejoComment[]>(path, { host: hostname, token });
+      if (res.outcome !== "ok") return [];
+      const data = Array.isArray(res.data) ? res.data : null;
+      return data ?? [];
     },
 
     runStaleWipCommand,

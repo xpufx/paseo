@@ -8,10 +8,11 @@
 // Parity against the Python original itself is a separate, recorded exercise:
 // see `docs/issues-check-parity.md`.
 
-import { describe, it } from "node:test";
+import { describe, it, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { setFetchForTest, setTokenResolverForTest } from "./forgejo-api.js";
 import path from "node:path";
 
 import {
@@ -150,24 +151,30 @@ describe("stale WIP sweep (ported from forgejo-issues-check.test.py)", () => {
 });
 
 describe("getOpenIssues pagination (#1195)", () => {
+  afterEach(() => {
+    setFetchForTest(null);
+    setTokenResolverForTest(null);
+  });
+
   it("paginates across multiple pages until a partial page is returned", async () => {
     const requestedUrls: string[] = [];
     const page1Issues = Array.from({ length: 50 }, (_, i) => issue(i + 1));
     const page2Issues = Array.from({ length: 15 }, (_, i) => issue(i + 51));
 
-    const runner = async (args: string[]) => {
-      const url = args[1];
-      requestedUrls.push(url);
+    setTokenResolverForTest(async () => "test-token");
+    setFetchForTest(async (input: any) => {
+      const url = String(input);
+      requestedUrls.push(url.replace(/^https?:\/\/[^/]+/, ""));
       if (url.includes("page=1")) {
-        return { code: 0, stdout: JSON.stringify(page1Issues), stderr: "" };
+        return { ok: true, status: 200, statusText: "OK", json: async () => page1Issues };
       }
       if (url.includes("page=2")) {
-        return { code: 0, stdout: JSON.stringify(page2Issues), stderr: "" };
+        return { ok: true, status: 200, statusText: "OK", json: async () => page2Issues };
       }
-      return { code: 0, stdout: "[]", stderr: "" };
-    };
+      return { ok: true, status: 200, statusText: "OK", json: async () => [] };
+    });
 
-    const io = createDefaultIssuesCheckIo(runner);
+    const io = createDefaultIssuesCheckIo();
     const result = await io.getOpenIssues("forge.example.com", "org/repo");
 
     assert.equal(result.ok, true);
@@ -182,12 +189,13 @@ describe("getOpenIssues pagination (#1195)", () => {
     const requestedUrls: string[] = [];
     const page1Issues = Array.from({ length: 10 }, (_, i) => issue(i + 1));
 
-    const runner = async (args: string[]) => {
-      requestedUrls.push(args[1]);
-      return { code: 0, stdout: JSON.stringify(page1Issues), stderr: "" };
-    };
+    setTokenResolverForTest(async () => "test-token");
+    setFetchForTest(async (input: any) => {
+      requestedUrls.push(String(input).replace(/^https?:\/\/[^/]+/, ""));
+      return { ok: true, status: 200, statusText: "OK", json: async () => page1Issues };
+    });
 
-    const io = createDefaultIssuesCheckIo(runner);
+    const io = createDefaultIssuesCheckIo();
     const result = await io.getOpenIssues("forge.example.com", "org/repo");
 
     assert.equal(result.ok, true);
@@ -197,8 +205,10 @@ describe("getOpenIssues pagination (#1195)", () => {
   });
 
   it("handles empty issues list gracefully", async () => {
-    const runner = async () => ({ code: 0, stdout: "[]", stderr: "" });
-    const io = createDefaultIssuesCheckIo(runner);
+    setTokenResolverForTest(async () => "test-token");
+    setFetchForTest(async () => ({ ok: true, status: 200, statusText: "OK", json: async () => [] }));
+
+    const io = createDefaultIssuesCheckIo();
     const result = await io.getOpenIssues("forge.example.com", "org/repo");
 
     assert.equal(result.ok, true);
@@ -207,14 +217,15 @@ describe("getOpenIssues pagination (#1195)", () => {
   });
 
   it("surfaces transport failure during pagination", async () => {
-    const runner = async (args: string[]) => {
-      if (args[1].includes("page=1")) {
-        return { code: 0, stdout: JSON.stringify(Array.from({ length: 50 }, (_, i) => issue(i + 1))), stderr: "" };
+    setTokenResolverForTest(async () => "test-token");
+    setFetchForTest(async (input: any) => {
+      if (String(input).includes("page=1")) {
+        return { ok: true, status: 200, statusText: "OK", json: async () => Array.from({ length: 50 }, (_, i) => issue(i + 1)) };
       }
-      return { code: 1, stdout: "", stderr: "network timeout" };
-    };
+      return { ok: false, status: 500, statusText: "Server Error", json: async () => ({ message: "network timeout" }) };
+    });
 
-    const io = createDefaultIssuesCheckIo(runner);
+    const io = createDefaultIssuesCheckIo();
     const result = await io.getOpenIssues("forge.example.com", "org/repo");
 
     assert.equal(result.ok, false);
