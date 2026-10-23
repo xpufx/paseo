@@ -2471,20 +2471,16 @@ export function ProjectGroupCard({
                   </>
                 );
               })()}
-              <Badge
-                label={`${group.orchestrators.length} Orchestrator${
-                  group.orchestrators.length === 1 ? "" : "s"
-                }`}
-                variant="neutral"
-                size="sm"
-                textStyle={{ fontSize: 10 }}
-              />
-              <Badge
-                label={`${workerCount} Worker${workerCount === 1 ? "" : "s"}`}
-                variant="neutral"
-                size="sm"
-                textStyle={{ fontSize: 10 }}
-              />
+              <Text
+                numberOfLines={1}
+                style={{
+                  color: colors.foregroundMuted,
+                  fontSize: 11,
+                  flexShrink: 0,
+                }}
+              >
+                {`${group.orchestrators.length} orch · ${workerCount} worker${workerCount === 1 ? "" : "s"}`}
+              </Text>
 
               {/* Fleet Roster Enrolled & Detached Badges (#426) */}
               {group.isPaused && onTogglePause && (

@@ -144,7 +144,24 @@ export const ActionBar = HostActionBar;
 export const AttentionBeacon = HostAttentionBeacon;
 export const Badge = HostBadge;
 export const Button = HostButton;
-export const Card = HostCard;
+
+const FleetCardBase: React.FC<HostCardProps> = ({ variant, style, ...props }) => {
+  const { colors } = useHostTheme();
+  const elevatedStyle =
+    !variant || variant === "flat"
+      ? {
+          backgroundColor: alpha(colors.surface1, 0.5),
+          borderWidth: 1,
+          borderColor: alpha(colors.border, 0.55),
+          borderRadius: 6,
+        }
+      : undefined;
+  return <HostCard variant={variant} style={[elevatedStyle, style]} {...props} />;
+};
+
+export const Card = Object.assign(FleetCardBase, {
+  Header: HostCardHeader,
+});
 export const CardHeader = HostCardHeader;
 export const CodeBlock = HostCodeBlock;
 export const Collapsible = HostCollapsible;
