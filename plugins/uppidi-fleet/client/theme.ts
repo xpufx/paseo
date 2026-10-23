@@ -38,11 +38,11 @@ export interface FleetTypographyScale {
 }
 
 const FLEET_TYPOGRAPHY: FleetTypographyScale = {
-  title: { fontSize: 15, lineHeight: 21, fontWeight: "600" },
-  heading: { fontSize: 13, lineHeight: 19, fontWeight: "600" },
+  title: { fontSize: 16, lineHeight: 22, fontWeight: "700" },
+  heading: { fontSize: 14, lineHeight: 20, fontWeight: "600" },
   body: { fontSize: 12, lineHeight: 18, fontWeight: "400" },
   bodyStrong: { fontSize: 12, lineHeight: 18, fontWeight: "600" },
-  bodySmall: { fontSize: 11, lineHeight: 15, fontWeight: "400" },
+  bodySmall: { fontSize: 11, lineHeight: 16, fontWeight: "400" },
   caption: { fontSize: 10, lineHeight: 14, fontWeight: "400" },
   label: { fontSize: 11, lineHeight: 15, fontWeight: "600" },
 };

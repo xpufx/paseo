@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useState, useEffect } from "react";
-import { Animated, Linking, Platform, Text, View, type NativeSyntheticEvent, type NativeScrollEvent, type ScrollView } from "react-native";
+import { Animated, Linking, Platform, StyleSheet, Text, View, type NativeSyntheticEvent, type NativeScrollEvent, type ScrollView } from "react-native";
 import { ScrollView as HostScrollView, Icon } from "@getpaseo/plugin/client/react-native";
 import {
   AttentionBeacon,
@@ -1916,9 +1916,9 @@ export function DenseAgentRow({
           // only there to help the eye track across a wide row. Hover wins, and
           // alpha() over colors.surface1 keeps it correct in light and dark.
           backgroundColor: isHovered
-            ? alpha(colors.accent, 0.05)
+            ? alpha(colors.surface2, 0.8)
             : siblingIndex % 2 === 1
-              ? alpha(colors.surface1, 0.5)
+              ? alpha(colors.surface1, 0.35)
               : "transparent",
           overflow: "visible",
         }}
@@ -2134,6 +2134,8 @@ export function OrchestratorRow({
         paddingHorizontal: 8,
         paddingVertical: 4,
         borderRadius: 4,
+        borderLeftWidth: 3,
+        borderLeftColor: colors.accent,
         // Orchestrator visual distinctiveness without box bloat (#1192).
         // Default subtle accent tint distinguishes trunk orchestrator nodes from worker subagents.
         backgroundColor: isHovered
@@ -2373,6 +2375,7 @@ export function ProjectGroupCard({
   onTogglePause?: (repo: string, currentlyPaused?: boolean) => Promise<void> | void;
   isActionLoading?: boolean;
 }) {
+  const { alpha } = useFleetTheme();
   const workerCount = group.totalCount - group.orchestrators.length;
   const pausedBadge = (
     <Badge
@@ -2392,7 +2395,11 @@ export function ProjectGroupCard({
         borderLeftWidth: group.isPaused ? 2 : 0,
         borderLeftColor: group.isPaused ? colors.warning || colors.accent : "transparent",
         paddingLeft: group.isPaused ? 6 : 0,
-        overflow: "visible",
+        backgroundColor: alpha(colors.surface1, 0.45),
+        borderWidth: 1,
+        borderColor: alpha(colors.border, 0.55),
+        borderRadius: 6,
+        overflow: "hidden",
       }}
     >
       <Stack gap={4}>
@@ -2406,6 +2413,9 @@ export function ProjectGroupCard({
             paddingHorizontal: 6,
             paddingVertical: 4,
             borderRadius: 6,
+            backgroundColor: alpha(colors.surface2, 0.4),
+            borderBottomWidth: 1,
+            borderBottomColor: alpha(colors.border, 0.4),
           }}
           accessibilityRole="button"
           accessibilityLabel={`${isExpanded ? "Collapse" : "Expand"} project group ${group.projectName}`}
@@ -2446,14 +2456,17 @@ export function ProjectGroupCard({
                     >
                       {display.primaryName}
                     </Text>
-                    {display.orgPill && (
-                      <Badge label={display.orgPill} variant="neutral" size="sm" textStyle={{ fontSize: 10 }} />
-                    )}
-                    {display.rootShaPill && (
-                      <Badge label={display.rootShaPill} variant="neutral" size="sm" textStyle={{ fontSize: 10 }} />
-                    )}
-                    {display.worktreePill && (
-                      <Badge label={display.worktreePill} variant="neutral" size="sm" textStyle={{ fontSize: 10 }} />
+                    {[display.orgPill, display.rootShaPill, display.worktreePill].filter(Boolean).length > 0 && (
+                      <Text
+                        numberOfLines={1}
+                        style={{
+                          color: colors.foregroundMuted,
+                          fontSize: 11,
+                          flexShrink: 1,
+                        }}
+                      >
+                        {[display.orgPill, display.rootShaPill, display.worktreePill].filter(Boolean).join(" · ")}
+                      </Text>
                     )}
                   </>
                 );
@@ -2645,18 +2658,25 @@ export function ProjectGroupCard({
                         }}
                       >
                         {orchNode.children.map((child, idx) => (
-                          <DenseAgentRow
+                          <View
                             key={child.agent.id}
-                            node={child}
+                            style={{
+                              borderBottomWidth: idx < orchNode.children!.length - 1 ? StyleSheet.hairlineWidth : 0,
+                              borderBottomColor: alpha(colors.border, 0.25),
+                            }}
+                          >
+                            <DenseAgentRow
+                              node={child}
                               siblingIndex={idx}
-                            depth={1}
-                            isLast={idx === orchNode.children.length - 1}
-                            colors={colors}
-                            typography={typography}
-                            navigation={navigation}
-                            archivingAgentId={archivingAgentId}
-                            onArchiveAgent={onArchiveAgent}
-                          />
+                              depth={1}
+                              isLast={idx === orchNode.children!.length - 1}
+                              colors={colors}
+                              typography={typography}
+                              navigation={navigation}
+                              archivingAgentId={archivingAgentId}
+                              onArchiveAgent={onArchiveAgent}
+                            />
+                          </View>
                         ))}
                       </View>
                     )}
