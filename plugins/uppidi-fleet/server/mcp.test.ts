@@ -47,8 +47,10 @@ import {
   handleFleetToolList,
   handleFleetToolExecute,
   renderWatchdogAuditMarkdown,
+  createFleetTicketHandlers,
   setTicketHandlersForTest,
 } from "./mcp.js";
+import { setTokenResolverForTest } from "./forgejo-api.js";
 import { HookRouter, setActiveHookRouter, type WatchdogAuditResult } from "./hook-router.js";
 import type { IssuesCheckIo } from "./issues-check.js";
 
@@ -1172,6 +1174,52 @@ describe("fleet MCP tools and handlers", () => {
       const ciLogsData = JSON.parse(ciLogsRes.content[0]!.text);
       assert.equal(ciLogsData.run.id, 55);
       assert.equal(ciLogsData.stepLog, "Build step output log");
+    });
+
+    test("createFleetTicketHandlers routes token by role to ForgeClient (#1428)", async () => {
+      const originalFetch = globalThis.fetch;
+      const originalEnv = process.env.UPPIDI_FLEET_ROLE;
+      const capturedAuthHeaders: string[] = [];
+
+      globalThis.fetch = (async (_url: any, init: any) => {
+        const headers = (init?.headers ?? {}) as Record<string, string>;
+        const auth = headers.Authorization || headers.authorization || "";
+        capturedAuthHeaders.push(auth);
+        return new Response(JSON.stringify([]), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }) as any;
+
+      setTokenResolverForTest(async (_host, role) => {
+        if (role === "front-desk") return "tok-frontdesk-999";
+        if (role === "worker") return "tok-worker-888";
+        return "tok-default-111";
+      });
+
+      try {
+        // 1. Explicit role 'front-desk'
+        const frontDeskHandlers = createFleetTicketHandlers("front-desk");
+        await frontDeskHandlers.handleOpenIssues({ page: 1, remoteUrl: "https://forge.test/org/repo" });
+        assert.equal(capturedAuthHeaders[capturedAuthHeaders.length - 1], "token tok-frontdesk-999");
+
+        // 2. Dynamic role from process.env.UPPIDI_FLEET_ROLE = 'worker'
+        process.env.UPPIDI_FLEET_ROLE = "worker";
+        const envHandlers = createFleetTicketHandlers();
+        await envHandlers.handleOpenIssues({ page: 1, remoteUrl: "https://forge.test/org/repo" });
+        assert.equal(capturedAuthHeaders[capturedAuthHeaders.length - 1], "token tok-worker-888");
+
+        // 3. Fallback when UPPIDI_FLEET_ROLE is unset
+        delete process.env.UPPIDI_FLEET_ROLE;
+        const fallbackHandlers = createFleetTicketHandlers();
+        await fallbackHandlers.handleOpenIssues({ page: 1, remoteUrl: "https://forge.test/org/repo" });
+        assert.equal(capturedAuthHeaders[capturedAuthHeaders.length - 1], "token tok-default-111");
+      } finally {
+        globalThis.fetch = originalFetch;
+        if (originalEnv !== undefined) process.env.UPPIDI_FLEET_ROLE = originalEnv;
+        else delete process.env.UPPIDI_FLEET_ROLE;
+        setTokenResolverForTest(null);
+      }
     });
 
     test("executeFleetTool dispatches all 33 tools", async () => {

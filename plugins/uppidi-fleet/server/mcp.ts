@@ -5,6 +5,7 @@ import {
   type UppidiFleetToolExecuteInput,
   type UppidiFleetToolExecuteOutput,
   type PlaybookStageName,
+  type FleetRole,
   type FleetMode,
   type UppidiAuditRecordInput,
   type UppidiAuditVerdict,
@@ -24,6 +25,7 @@ import {
 import {
   forgejoApiRequest,
   resolveForgejoToken,
+  forgejoToken,
 } from "./forgejo-api.js";
 import {
   HookRouter,
@@ -1239,7 +1241,8 @@ export async function executeFleetCheckBoard(
     });
 
     if (diagnosticComment && outcome.decisionTraces && outcome.decisionTraces.length > 0 && !dryRun) {
-      const token = await resolveForgejoToken(targetHost);
+      const activeRole = (process.env.UPPIDI_FLEET_ROLE as FleetRole | undefined) || undefined;
+      const token = await resolveForgejoToken(targetHost, activeRole);
       for (const t of outcome.decisionTraces) {
         try {
           await forgejoApiRequest(
@@ -2784,9 +2787,19 @@ export async function executeFleetAuditSummary(
 
 let cachedTicketHandlers: TicketHandlers | undefined;
 
+export function createFleetTicketHandlers(role?: FleetRole | string | null): TicketHandlers {
+  return createTicketHandlers({
+    storagePluginId: "uppidi-fleet",
+    resolveToken: async (host: string) => {
+      const activeRole = role !== undefined ? role : (process.env.UPPIDI_FLEET_ROLE || "").trim();
+      return forgejoToken(host, activeRole || undefined);
+    },
+  });
+}
+
 export function getTicketHandlers(): TicketHandlers {
   if (!cachedTicketHandlers) {
-    cachedTicketHandlers = createTicketHandlers();
+    cachedTicketHandlers = createFleetTicketHandlers();
   }
   return cachedTicketHandlers;
 }
