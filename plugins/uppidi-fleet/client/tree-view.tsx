@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useState, useEffect } from "react";
-import { Animated, Linking, Platform, StyleSheet, Text, View, type NativeSyntheticEvent, type NativeScrollEvent, type ScrollView } from "react-native";
+import { Animated, Linking, Platform, Text, View, type NativeSyntheticEvent, type NativeScrollEvent, type ScrollView } from "react-native";
 import { ScrollView as HostScrollView, Icon } from "@getpaseo/plugin/client/react-native";
 import {
   AttentionBeacon,
@@ -2657,7 +2657,7 @@ export function ProjectGroupCard({
                           <View
                             key={child.agent.id}
                             style={{
-                              borderBottomWidth: idx < orchNode.children!.length - 1 ? StyleSheet.hairlineWidth : 0,
+                              borderBottomWidth: idx < orchNode.children!.length - 1 ? 1 : 0,
                               borderBottomColor: alpha(colors.border, 0.25),
                             }}
                           >

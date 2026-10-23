@@ -125,7 +125,7 @@ export type RpcPrimitiveOperationBinding = z.infer<typeof RpcPrimitiveOperationB
 export type RpcHttpOperationBinding = z.infer<typeof RpcHttpOperationBindingSchema>;
 
 export const SlashSettingsSchema = z.object({
-  prefix: z.string().max(32).default("slash-"),
+  prefix: z.string().max(32).default(""),
   commands: z.array(SlashCommandSchema).default([]),
   // Custom bindings layered over SEED_OPERATION_BINDINGS; a binding with the same
   // name as a seed overrides it, so seeds stay resolvable without an explicit copy.

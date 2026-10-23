@@ -28,9 +28,9 @@ function command(name: string): SlashCommand {
 const validSend = draft({ name: "deploy", title: "Deploy", template: "Ship {args}" });
 
 describe("SlashSettingsSchema prefix", () => {
-  it("defaults an unset prefix to slash- but keeps an explicit empty override", () => {
-    expect(SlashSettingsSchema.parse({ commands: [] }).prefix).toBe("slash-");
-    expect(SlashSettingsSchema.parse({ prefix: "", commands: [] }).prefix).toBe("");
+  it("defaults an unset prefix to empty string and respects custom prefix", () => {
+    expect(SlashSettingsSchema.parse({ commands: [] }).prefix).toBe("");
+    expect(SlashSettingsSchema.parse({ prefix: "slash-", commands: [] }).prefix).toBe("slash-");
   });
 });
 

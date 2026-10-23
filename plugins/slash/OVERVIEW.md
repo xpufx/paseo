@@ -1,6 +1,6 @@
 S/ash allows users to define custom slash commands for the Paseo composer and manage them from a dedicated sidebar console. Commands can interpolate chat arguments into prompt templates sent to the active agent, navigate to installed plugin surfaces, or execute backend operations on the daemon host with output appended directly to the session timeline.
 
-A configurable command prefix (defaulting to `slash-`, or empty for bare command names) applies across all registered commands. Enabled commands can be exported and imported as versioned JSON bundles to share configurations across machines. Shipped seed commands include prompt review, opening the console, ping, querying active agent identity (`whoami`, `who-are-you`), orchestrator role handover, and commands for the `agent-mux` CLI.
+A configurable command prefix (defaulting to empty for bare command names, or customizable to a namespace like `slash-`) applies across all registered commands. Enabled commands can be exported and imported as versioned JSON bundles to share configurations across machines. Shipped seed commands include prompt review, opening the console, ping, querying active agent identity (`whoami`, `who-are-you`), orchestrator role handover, and commands for the `agent-mux` CLI.
 
 ## Setup
 

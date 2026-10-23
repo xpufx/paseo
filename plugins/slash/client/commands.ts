@@ -63,6 +63,48 @@ export interface RegisterSlashCommandsOptions {
   maxBackoffMs?: number;
 }
 
+async function executeSlashCommand(
+  clientRpc: PluginClientContext["rpc"],
+  ctxRpc: PluginClientContext["rpc"] | undefined,
+  ctxAgentId: string,
+  openSurface: ((id: string) => void) | undefined,
+  command: SlashCommand,
+  args: string,
+): Promise<void> {
+  const rpc = ctxRpc ?? clientRpc;
+  if (command.action.verb === "send") {
+    try {
+      await (rpc as unknown as (c: unknown, i: unknown) => Promise<unknown>)(
+        runCommandRpc as unknown,
+        { name: command.name, args, agentId: ctxAgentId },
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      report(`send:${command.name}`, err);
+      showFeedback(`/${command.name} send failed: ${message}`, true);
+    }
+  } else if (command.action.verb === "open") {
+    const target = command.action.verb === "open" ? command.action.target : "";
+    if (typeof openSurface === "function") {
+      openSurface(target);
+    } else {
+      report(`open:${command.name}`, "openSurface not available on context");
+    }
+  } else {
+    try {
+      await (rpc as unknown as (c: unknown, i: unknown) => Promise<{ result?: unknown }>)(
+        runCommandRpc as unknown,
+        { name: command.name, args, agentId: ctxAgentId },
+      );
+      showFeedback(`/${command.name} executed`);
+    } catch (e) {
+      const errMessage = e instanceof Error ? e.message : String(e);
+      report(`run-command:${command.name}`, errMessage);
+      showFeedback(`/${command.name} failed: ${errMessage}`, true);
+    }
+  }
+}
+
 export function registerSlashCommands(
   client: PluginClientContext,
   options?: RegisterSlashCommandsOptions,
@@ -144,63 +186,80 @@ export function registerSlashCommands(
 
       for (const command of commands) {
         const name = withPrefix(prefix, command.name);
-        if (command.action.verb === "send") {
-          removers.push(
-            client.addSlashCommand({
-              name,
-              description: command.description || command.title,
-              argumentHint: "{args}",
-              context: "agent",
-              async onSubmit(ctx) {
-                try {
-                  await (client.rpc as unknown as (c: unknown, i: unknown) => Promise<unknown>)(
-                    runCommandRpc as unknown,
-                    { name: command.name, args: ctx.args, agentId: ctx.agent.id },
-                  );
-                } catch (err) {
-                  const message = err instanceof Error ? err.message : String(err);
-                  report(`send:${command.name}`, err);
-                  showFeedback(`/${command.name} send failed: ${message}`, true);
-                }
-              },
-            }),
-          );
-        } else if (command.action.verb === "open") {
-          const target = command.action.verb === "open" ? command.action.target : "";
-          removers.push(
-            client.addSlashCommand({
-              name,
-              description: command.description || command.title,
-              argumentHint: "",
-              context: "agent",
-              async onSubmit(ctx) {
-                ctx.openSurface(target);
-              },
-            }),
-          );
-        } else {
-          removers.push(
-            client.addSlashCommand({
-              name,
-              description: command.description || command.title,
-              argumentHint: "[args]",
-              context: "agent",
-              async onSubmit(ctx) {
-                try {
-                  await (client.rpc as unknown as (c: unknown, i: unknown) => Promise<{ result?: unknown }>)(
-                    runCommandRpc as unknown,
-                    { name: command.name, args: ctx.args, agentId: ctx.agent.id },
-                  );
-                  showFeedback(`/${command.name} executed`);
-                } catch (e) {
-                  const errMessage = e instanceof Error ? e.message : String(e);
-                  report(`run-command:${command.name}`, errMessage);
-                  showFeedback(`/${command.name} failed: ${errMessage}`, true);
-                }
-              },
-            }),
-          );
-        }
+        const hint =
+          command.action.verb === "send"
+            ? "{args}"
+            : command.action.verb === "open"
+              ? ""
+              : "[args]";
+        removers.push(
+          client.addSlashCommand({
+            name,
+            description: command.description || command.title,
+            argumentHint: hint,
+            context: "agent",
+            async onSubmit(ctx) {
+              await executeSlashCommand(
+                client.rpc,
+                ctx.rpc,
+                ctx.agent.id,
+                ctx.openSurface,
+                command,
+                ctx.args,
+              );
+            },
+          }),
+        );
+      }
+
+      // Register universal root router command (/slash) so environments with
+      // single-slot or last-write-wins registration (e.g. mobile Bridgeless RN)
+      // preserve complete command dispatch capability across all configured commands.
+      const routerName = prefix ? withPrefix(prefix, "slash") : "slash";
+      const hasExplicitSlashCommand = commands.some(
+        (c) => withPrefix(prefix, c.name) === routerName,
+      );
+      if (!hasExplicitSlashCommand) {
+        removers.push(
+          client.addSlashCommand({
+            name: routerName,
+            description: "Execute a slash command",
+            argumentHint: "[command] [args]",
+            context: "agent",
+            async onSubmit(ctx) {
+              const trimmed = (ctx.args ?? "").trim();
+              if (!trimmed) {
+                const available = commands.map((c) => c.name).join(", ");
+                showFeedback(`Available commands: ${available}`);
+                return;
+              }
+              const spaceIdx = trimmed.indexOf(" ");
+              const subName = spaceIdx === -1 ? trimmed : trimmed.slice(0, spaceIdx);
+              const subArgs = spaceIdx === -1 ? "" : trimmed.slice(spaceIdx + 1).trim();
+
+              const targetCmd = commands.find(
+                (c) =>
+                  c.name === subName ||
+                  withPrefix(prefix, c.name) === subName ||
+                  c.name.toLowerCase() === subName.toLowerCase(),
+              );
+
+              if (!targetCmd) {
+                showFeedback(`Unknown slash command: ${subName}`, true);
+                return;
+              }
+
+              await executeSlashCommand(
+                client.rpc,
+                ctx.rpc,
+                ctx.agent.id,
+                ctx.openSurface,
+                targetCmd,
+                subArgs,
+              );
+            },
+          }),
+        );
       }
     } finally {
       isSyncing = false;

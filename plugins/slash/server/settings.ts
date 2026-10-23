@@ -9,7 +9,7 @@ import {
 } from "../shared/resources";
 
 export const DEFAULT_SLASH_SETTINGS: SlashSettings = {
-  prefix: "slash-",
+  prefix: "",
   commands: SEED_COMMANDS,
   operationBindings: SEED_OPERATION_BINDINGS,
   hookUrl: "",

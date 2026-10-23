@@ -46,8 +46,8 @@ Built on [paseo-plugin-helper](https://github.com/xpufx/paseo/tree/main/packages
   - `/agent-mux` -- execute [agent-mux](https://github.com/xpufx/agent-mux) subcommands (`status`, `probe`, `cooldowns`, `help`, etc.) directly from chat with safe argument forwarding.
   - `/orchestrate` -- hand the orchestrator role to the calling agent via the [Uppidi Fleet](https://fleet.uppidi.com/) webhook hook.
   - `/ping` -- test daemon RPC round-trip.
-- **Prefix.** An optional shared prefix (default `slash-`, clearable to render
-  bare command names) is applied to every command name.
+- **Prefix.** An optional shared prefix (default empty to render bare
+  command names, customizable to e.g. `slash-`) is applied to every command name.
 - **Argument Forwarding.** Arguments typed after slash commands in chat are safely passed to prompt templates (`{args}`) or parsed and forwarded as array arguments to backend RPC execution.
 - **Bundle import/export.** Enabled commands round-trip through a versioned
   `slash-commands` document, so a command set can be shared between machines.

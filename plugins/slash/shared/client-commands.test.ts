@@ -16,7 +16,7 @@ interface Contribution {
   onSubmit(ctx: unknown): void | Promise<void>;
 }
 
-function harness() {
+function harness(options?: { prefix?: string }) {
   const rpcCalls: Array<{ contract: unknown; input: unknown }> = [];
   const contributions: Contribution[] = [];
   const sent: string[] = [];
@@ -25,7 +25,7 @@ function harness() {
   const rpc = vi.fn(async (contract: unknown, input: unknown) => {
     rpcCalls.push({ contract, input });
     if (contract === listCommandsRpc) return { commands: SEED_COMMANDS };
-    if (contract === slashSettingsContract.get) return { prefix: "slash-" };
+    if (contract === slashSettingsContract.get) return { prefix: options?.prefix ?? "" };
     if (contract === runCommandRpc) return { verb: "rpc", result: { ok: true } };
     throw new Error("unexpected contract");
   });
@@ -63,8 +63,8 @@ describe("registerSlashCommands rpc wiring", () => {
     const { client, rpcCalls, contributions, sent, agentRef } = harness();
     const dispose = registerSlashCommands(client);
 
-    await vi.waitFor(() => expect(contributions.length).toBe(SEED_COMMANDS.length));
-    const orchestrate = contributions.find((c) => c.name === "slash-orchestrate");
+    await vi.waitFor(() => expect(contributions.length).toBe(SEED_COMMANDS.length + 1));
+    const orchestrate = contributions.find((c) => c.name === "orchestrate");
     expect(orchestrate).toBeDefined();
 
     await orchestrate?.onSubmit({
@@ -90,14 +90,14 @@ describe("registerSlashCommands rpc wiring", () => {
     const { client, contributions, sent, agentRef } = harness();
     client.rpc = vi.fn(async (contract: unknown) => {
       if (contract === listCommandsRpc) return { commands: SEED_COMMANDS };
-      if (contract === slashSettingsContract.get) return { prefix: "slash-" };
+      if (contract === slashSettingsContract.get) return { prefix: "" };
       if (contract === runCommandRpc) throw new Error("network partition");
       throw new Error("unexpected contract");
     }) as unknown as PluginClientContext["rpc"];
 
     const dispose = registerSlashCommands(client);
-    await vi.waitFor(() => expect(contributions.length).toBe(SEED_COMMANDS.length));
-    const ping = contributions.find((c) => c.name === "slash-ping");
+    await vi.waitFor(() => expect(contributions.length).toBe(SEED_COMMANDS.length + 1));
+    const ping = contributions.find((c) => c.name === "ping");
     expect(ping).toBeDefined();
 
     await ping?.onSubmit({
@@ -117,8 +117,8 @@ describe("registerSlashCommands rpc wiring", () => {
     const { client, rpcCalls, contributions, sent, timelineAppended, agentRef } = harness();
     const dispose = registerSlashCommands(client);
 
-    await vi.waitFor(() => expect(contributions.length).toBe(SEED_COMMANDS.length));
-    const review = contributions.find((c) => c.name === "slash-review");
+    await vi.waitFor(() => expect(contributions.length).toBe(SEED_COMMANDS.length + 1));
+    const review = contributions.find((c) => c.name === "review");
     expect(review).toBeDefined();
 
     await review?.onSubmit({
@@ -159,8 +159,8 @@ describe("registerSlashCommands rpc wiring", () => {
     });
 
     const dispose = registerSlashCommands(client);
-    await vi.waitFor(() => expect(contributions.length).toBe(SEED_COMMANDS.length));
-    const ping = contributions.find((c) => c.name === "slash-ping");
+    await vi.waitFor(() => expect(contributions.length).toBe(SEED_COMMANDS.length + 1));
+    const ping = contributions.find((c) => c.name === "ping");
     expect(ping).toBeDefined();
 
     await ping?.onSubmit({
@@ -193,8 +193,8 @@ describe("registerSlashCommands rpc wiring", () => {
     agentRef.send = vi.fn();
 
     const dispose = registerSlashCommands(client);
-    await vi.waitFor(() => expect(contributions.length).toBe(SEED_COMMANDS.length));
-    const review = contributions.find((c) => c.name === "slash-review");
+    await vi.waitFor(() => expect(contributions.length).toBe(SEED_COMMANDS.length + 1));
+    const review = contributions.find((c) => c.name === "review");
     expect(review).toBeDefined();
 
     await review?.onSubmit({
@@ -234,14 +234,14 @@ describe("registerSlashCommands rpc wiring", () => {
     // Force runCommandRpc to fail
     (client.rpc as any).mockImplementation(async (contract: unknown) => {
       if (contract === listCommandsRpc) return { commands: SEED_COMMANDS };
-      if (contract === slashSettingsContract.get) return { prefix: "slash-" };
+      if (contract === slashSettingsContract.get) return { prefix: "" };
       if (contract === runCommandRpc) throw new Error("Server RPC offline");
       throw new Error("unexpected contract");
     });
 
     const dispose = registerSlashCommands(client);
-    await vi.waitFor(() => expect(contributions.length).toBe(SEED_COMMANDS.length));
-    const review = contributions.find((c) => c.name === "slash-review");
+    await vi.waitFor(() => expect(contributions.length).toBe(SEED_COMMANDS.length + 1));
+    const review = contributions.find((c) => c.name === "review");
     expect(review).toBeDefined();
 
     await review?.onSubmit({
@@ -332,7 +332,7 @@ describe("registerSlashCommands reconnect backoff & command cache resilience (#1
       // At 5000ms: 3rd retry fires (succeeds, rpcCount = 4)
       await vi.advanceTimersByTimeAsync(100);
       expect(rpcCount).toBe(4);
-      expect(contributions).toHaveLength(SEED_COMMANDS.length);
+      expect(contributions).toHaveLength(SEED_COMMANDS.length + 1);
 
       dispose();
     } finally {
@@ -374,8 +374,8 @@ describe("registerSlashCommands reconnect backoff & command cache resilience (#1
 
       // Initial sync succeeds
       await vi.advanceTimersByTimeAsync(0);
-      expect(registeredCommands.size).toBe(SEED_COMMANDS.length);
-      expect(activeRemovers.size).toBe(SEED_COMMANDS.length);
+      expect(registeredCommands.size).toBe(SEED_COMMANDS.length + 1);
+      expect(activeRemovers.size).toBe(SEED_COMMANDS.length + 1);
 
       // Now server disconnects
       shouldFail = true;
@@ -383,20 +383,20 @@ describe("registerSlashCommands reconnect backoff & command cache resilience (#1
       // Regular interval fires, sync fails
       await vi.advanceTimersByTimeAsync(10_000);
       // Verify commands and removers were RETAINED, not cleared
-      expect(registeredCommands.size).toBe(SEED_COMMANDS.length);
-      expect(activeRemovers.size).toBe(SEED_COMMANDS.length);
+      expect(registeredCommands.size).toBe(SEED_COMMANDS.length + 1);
+      expect(activeRemovers.size).toBe(SEED_COMMANDS.length + 1);
 
       // First retry fires at 1s, also fails
       await vi.advanceTimersByTimeAsync(1_000);
-      expect(registeredCommands.size).toBe(SEED_COMMANDS.length);
-      expect(activeRemovers.size).toBe(SEED_COMMANDS.length);
+      expect(registeredCommands.size).toBe(SEED_COMMANDS.length + 1);
+      expect(activeRemovers.size).toBe(SEED_COMMANDS.length + 1);
 
       // Server recovers
       shouldFail = false;
       // Second retry fires at 2s, succeeds
       await vi.advanceTimersByTimeAsync(2_000);
-      expect(registeredCommands.size).toBe(SEED_COMMANDS.length);
-      expect(activeRemovers.size).toBe(SEED_COMMANDS.length);
+      expect(registeredCommands.size).toBe(SEED_COMMANDS.length + 1);
+      expect(activeRemovers.size).toBe(SEED_COMMANDS.length + 1);
 
       // Disposal cleans up all removers
       dispose();
@@ -491,5 +491,184 @@ describe("registerSlashCommands reconnect backoff & command cache resilience (#1
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("root /slash router command delegation (#1210)", () => {
+  it("routes /slash review sub-command directly through runCommandRpc", async () => {
+    const { client, rpcCalls, contributions } = harness();
+    const dispose = registerSlashCommands(client);
+
+    await vi.waitFor(() => expect(contributions.length).toBe(SEED_COMMANDS.length + 1));
+    const slash = contributions.find((c) => c.name === "slash");
+    expect(slash).toBeDefined();
+
+    await slash?.onSubmit({
+      args: "review focus on memory leaks",
+      agent: { id: "agent-sub-1" },
+      paseo: client.paseo,
+    });
+
+    expect(rpcCalls).toContainEqual({
+      contract: runCommandRpc,
+      input: {
+        name: "review",
+        args: "focus on memory leaks",
+        agentId: "agent-sub-1",
+      },
+    });
+
+    dispose();
+  });
+
+  it("handles case-insensitive and un-prefixed sub-command invocation", async () => {
+    const { client, rpcCalls, contributions } = harness();
+    const dispose = registerSlashCommands(client);
+
+    await vi.waitFor(() => expect(contributions.length).toBe(SEED_COMMANDS.length + 1));
+    const slash = contributions.find((c) => c.name === "slash");
+    expect(slash).toBeDefined();
+
+    await slash?.onSubmit({
+      args: "Ping",
+      agent: { id: "agent-sub-2" },
+      paseo: client.paseo,
+    });
+
+    expect(rpcCalls).toContainEqual({
+      contract: runCommandRpc,
+      input: {
+        name: "ping",
+        args: "",
+        agentId: "agent-sub-2",
+      },
+    });
+
+    dispose();
+  });
+
+  it("shows available commands when called without sub-command arguments", async () => {
+    const { client, contributions } = harness();
+    const showMock = vi.fn();
+    const errorMock = vi.fn();
+
+    const { initClientHelpers } = await import("paseo-plugin-helper/core");
+    initClientHelpers({
+      Icon: (() => null) as any,
+      Modal: (() => null) as any,
+      useRpc: (() => () => Promise.resolve()) as any,
+      useToast: () => ({ show: showMock, error: errorMock }),
+    });
+
+    const dispose = registerSlashCommands(client);
+    await vi.waitFor(() => expect(contributions.length).toBe(SEED_COMMANDS.length + 1));
+    const slash = contributions.find((c) => c.name === "slash");
+    expect(slash).toBeDefined();
+
+    await slash?.onSubmit({
+      args: "",
+      agent: { id: "agent-sub-3" },
+      paseo: client.paseo,
+    });
+
+    expect(showMock).toHaveBeenCalled();
+    const msg = showMock.mock.calls[0]?.[0] as string;
+    expect(msg).toContain("Available commands:");
+    expect(msg).toContain("review");
+    expect(msg).toContain("ping");
+
+    dispose();
+  });
+
+  it("reports error toast when unknown sub-command is invoked", async () => {
+    const { client, contributions } = harness();
+    const showMock = vi.fn();
+    const errorMock = vi.fn();
+
+    const { initClientHelpers } = await import("paseo-plugin-helper/core");
+    initClientHelpers({
+      Icon: (() => null) as any,
+      Modal: (() => null) as any,
+      useRpc: (() => () => Promise.resolve()) as any,
+      useToast: () => ({ show: showMock, error: errorMock }),
+    });
+
+    const dispose = registerSlashCommands(client);
+    await vi.waitFor(() => expect(contributions.length).toBe(SEED_COMMANDS.length + 1));
+    const slash = contributions.find((c) => c.name === "slash");
+    expect(slash).toBeDefined();
+
+    await slash?.onSubmit({
+      args: "nonexistent-cmd some args",
+      agent: { id: "agent-sub-4" },
+      paseo: client.paseo,
+    });
+
+    expect(errorMock).toHaveBeenCalledWith("Unknown slash command: nonexistent-cmd");
+
+    dispose();
+  });
+});
+
+describe("mobile single-slot last-write-wins host resilience (#1210)", () => {
+  it("preserves universal /slash command when host client clobbers earlier registrations", async () => {
+    let activeContribution: Contribution | null = null;
+    const rpcCalls: Array<{ contract: unknown; input: unknown }> = [];
+
+    const rpc = vi.fn(async (contract: unknown, input: unknown) => {
+      rpcCalls.push({ contract, input });
+      if (contract === listCommandsRpc) return { commands: SEED_COMMANDS };
+      if (contract === slashSettingsContract.get) return { prefix: "" };
+      if (contract === runCommandRpc) return { verb: "rpc", result: { ok: true } };
+      throw new Error("unexpected contract");
+    });
+
+    // Simulates the mobile React Native host client where addSlashCommand
+    // overwrites a single registration slot per plugin
+    const singleSlotClient = {
+      rpc,
+      addSlashCommand: vi.fn((contribution: Contribution) => {
+        activeContribution = contribution;
+        return () => {
+          if (activeContribution === contribution) {
+            activeContribution = null;
+          }
+        };
+      }),
+      paseo: {
+        agents: {
+          ref: () => ({
+            send: vi.fn(),
+            timeline: { append: vi.fn() },
+          }),
+        },
+      },
+    } as unknown as PluginClientContext;
+
+    const dispose = registerSlashCommands(singleSlotClient);
+
+    // After all commands are registered in a single-slot host, the surviving
+    // active command is the universal root /slash router
+    await vi.waitFor(() => expect(activeContribution).not.toBeNull());
+    expect(activeContribution!.name).toBe("slash");
+
+    // Invoking a command through the surviving single-slot /slash registration works cleanly
+    await activeContribution!.onSubmit({
+      args: "review examine concurrency",
+      agent: { id: "mobile-agent-1" },
+      paseo: singleSlotClient.paseo,
+    });
+
+    expect(rpcCalls).toContainEqual({
+      contract: runCommandRpc,
+      input: {
+        name: "review",
+        args: "examine concurrency",
+        agentId: "mobile-agent-1",
+      },
+    });
+
+    dispose();
+    expect(activeContribution).toBeNull();
   });
 });
