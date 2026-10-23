@@ -11682,16 +11682,24 @@ export class HookRouter {
           }
         }
 
-        // Count tickets that require explicit Front Desk attention (#1354, #1357).
+        // Count tickets that require explicit Front Desk attention (#1354, #1357, #1521).
         // Front Desk attention requires explicit targeting (attention/frontdesk)
-        // or fleet-wide emergency (category === "sos"). Routine orchestrator
+        // or fleet-wide emergency (category === "sos" that is unhandled/stalled on
+        // attention/orchestrator). Tickets carrying attention/user are explicitly parked
+        // with the operator and must never wake Front Desk (#1521). Routine orchestrator
         // feedback or untargeted new tickets are delivered directly to the
         // repository orchestrators via webhooks and must not wake Front Desk.
         let totalFrontDeskAttention = 0;
         for (const c of res.candidates) {
-          if (
-            c.labels?.includes("attention/frontdesk") ||
-            c.category === "sos"
+          const labels = c.labels ?? [];
+          if (labels.includes("attention/user")) {
+            continue;
+          }
+          if (labels.includes("attention/frontdesk")) {
+            totalFrontDeskAttention++;
+          } else if (
+            c.category === "sos" &&
+            (labels.includes("attention/orchestrator") || !labels.some((l) => l.startsWith("attention/")))
           ) {
             totalFrontDeskAttention++;
           }
@@ -11740,16 +11748,20 @@ export class HookRouter {
         }
       }
       const hasWork = actionable.length > 0 || errors.length > 0;
-      // Dispatchable gate (#1354): suppress routine Front Desk sweep notifications
+      // Dispatchable gate (#1354, #1521): suppress routine Front Desk sweep notifications
       // only when there are zero dispatchable items AND zero Front Desk attention.
-      // Errors during board check must not be suppressed by the ticket gate (#733).
+      // Errors during board check must not be suppressed by the ticket gate (#733),
+      // and reporting of errors is decoupled from actionable 0-dispatch candidate lists (#1521).
       const totalDispatchable = actionable.reduce((sum, a) => sum + a.dispatchable, 0);
       const totalFrontDeskAttention = actionable.reduce(
         (sum, a) => sum + (a.totalFrontDeskAttention ?? 0),
         0,
       );
-      const dispatchableGateClosed = errors.length === 0 && totalDispatchable === 0 && totalFrontDeskAttention === 0;
-      const shouldNotify = hasWork && !dispatchableGateClosed && (actionableChanged || errorStateChanged);
+      const hasDispatchableWork = totalDispatchable > 0 || totalFrontDeskAttention > 0;
+      const notifyActionable = hasDispatchableWork && actionableChanged;
+      const notifyErrors = errors.length > 0 && errorStateChanged;
+      const shouldNotify = hasWork && (notifyActionable || notifyErrors);
+      const dispatchableGateClosed = !hasDispatchableWork && !notifyErrors;
 
 
       // Self-heal staffing (#889): an enrolled repo with actionable board work but
@@ -11770,7 +11782,7 @@ export class HookRouter {
       const frontDeskId = this.readFrontDesk()?.agentId ?? null;
       if (frontDeskId && shouldNotify) {
         const sections: string[] = [];
-        if (actionable.length > 0) {
+        if (actionable.length > 0 && hasDispatchableWork) {
           const lines = actionable.map((a) => {
             return `- ${a.repo}: ${a.count} actionable (${a.dispatchable} dispatchable)`;
           });
@@ -11782,17 +11794,19 @@ export class HookRouter {
             `[Fleet Board Sweep] ${errors.length} repo(s) FAILED board check - actionable tickets may be missed:\n${failureLines.join("\n")}`,
           );
         }
-        const alertMsg = sections.join("\n\n");
-        const isBusy = this.isAgentBusy(frontDeskId);
-        if (isBusy) {
-          this.log(`[info] Front Desk ${frontDeskId} is busy; queueing board sweep notification`);
-          this.enqueue("frontdesk", alertMsg, false);
-          notified = 1;
-        } else {
-          const ok = await this.deliverMessage(frontDeskId, alertMsg, { noWait: true, steer: false });
-          if (ok) {
-            this.lastDeliveryTimes.set(frontDeskId, Date.now());
+        if (sections.length > 0) {
+          const alertMsg = sections.join("\n\n");
+          const isBusy = this.isAgentBusy(frontDeskId);
+          if (isBusy) {
+            this.log(`[info] Front Desk ${frontDeskId} is busy; queueing board sweep notification`);
+            this.enqueue("frontdesk", alertMsg, false);
             notified = 1;
+          } else {
+            const ok = await this.deliverMessage(frontDeskId, alertMsg, { noWait: true, steer: false });
+            if (ok) {
+              this.lastDeliveryTimes.set(frontDeskId, Date.now());
+              notified = 1;
+            }
           }
         }
       } else if (frontDeskId && hasWork && !shouldNotify) {

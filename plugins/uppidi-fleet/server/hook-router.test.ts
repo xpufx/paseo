@@ -13117,6 +13117,128 @@ describe("zero-dispatch gate with explicit frontdesk attention (#1354)", () => {
     assert.equal(deliveries.length, 1);
   });
 
+  it("suppresses notification when SOS ticket carries attention/user (#1521)", async () => {
+    const deliveries: Array<{ agentId: string; prompt: string }> = [];
+    const mockPaseo = {
+      agents: {
+        ref: (id: string) => ({
+          send: async (prompt: string) => {
+            deliveries.push({ agentId: id, prompt });
+            return { ok: true };
+          },
+        }),
+      },
+    } as any;
+
+    const router = makeRouter();
+    router.setActivePaseo(mockPaseo);
+    router.writeFrontDesk("fd-1", "operator");
+
+    // An SOS ticket marked attention/user (e.g. paseo#1391) must not wake Front Desk
+    const io = makeCandidatesIo([
+      {
+        number: 1391,
+        title: "feat: dormant orchestrator idle shutdown with automatic on-demand webhook respawn",
+        labels: [{ name: "priority/sos" }, { name: "attention/user" }, { name: "state/triage" }],
+        comments: 0,
+        updated_at: "2026-01-01T00:00:00Z",
+        created_at: "2026-01-01T00:00:00Z",
+      },
+    ]);
+
+    const result = await router.runBoardSweep(["xpufx-org/paseo"], io);
+    assert.equal(result.ok, true);
+    assert.ok(result.actionable.length > 0, "should have actionable items");
+    assert.equal(result.notified, 0, "SOS ticket on attention/user must NOT wake Front Desk");
+    assert.equal(deliveries.length, 0);
+  });
+
+  it("notifies when SOS ticket is unhandled on attention/orchestrator (#1521)", async () => {
+    const deliveries: Array<{ agentId: string; prompt: string }> = [];
+    const mockPaseo = {
+      agents: {
+        ref: (id: string) => ({
+          send: async (prompt: string) => {
+            deliveries.push({ agentId: id, prompt });
+            return { ok: true };
+          },
+        }),
+      },
+    } as any;
+
+    const router = makeRouter();
+    router.setActivePaseo(mockPaseo);
+    router.writeFrontDesk("fd-1", "operator");
+
+    const io = makeCandidatesIo([
+      {
+        number: 302,
+        title: "Critical outage unhandled",
+        labels: [{ name: "priority/sos" }, { name: "attention/orchestrator" }, { name: "state/triage" }],
+        comments: 0,
+        updated_at: "2026-01-01T00:00:00Z",
+        created_at: "2026-01-01T00:00:00Z",
+      },
+    ]);
+
+    const result = await router.runBoardSweep(["xpufx-org/paseo"], io);
+    assert.equal(result.ok, true);
+    assert.ok(result.actionable.length > 0, "should have actionable items");
+    assert.equal(result.notified, 1, "SOS ticket on attention/orchestrator must wake Front Desk");
+    assert.equal(deliveries.length, 1);
+  });
+
+  it("reports only failed board check errors and omits 0-dispatchable ticket dumps (#1521)", async () => {
+    const deliveries: Array<{ agentId: string; prompt: string }> = [];
+    const mockPaseo = {
+      agents: {
+        ref: (id: string) => ({
+          send: async (prompt: string) => {
+            deliveries.push({ agentId: id, prompt });
+            return { ok: true };
+          },
+        }),
+      },
+    } as any;
+
+    const router = makeRouter();
+    router.setActivePaseo(mockPaseo);
+    router.writeFrontDesk("fd-1", "operator");
+
+    // Repo 1 has actionable tickets with 0 dispatchable and 0 frontdesk attention
+    const okIo = makeCandidatesIo([
+      {
+        number: 101,
+        title: "Waiting on user",
+        labels: [{ name: "state/verify" }, { name: "attention/user" }],
+        comments: 0,
+        updated_at: "2026-01-01T00:00:00Z",
+        created_at: "2026-01-01T00:00:00Z",
+      },
+    ]);
+
+    // Composite IO: repo1 returns okIo, repo2 returns error
+    const compositeIo: IssuesCheckIo = {
+      ...okIo,
+      getOpenIssues: async (hostname: string, repo: string) => {
+        if (repo.includes("failed-repo")) {
+          return { ok: false, error: "connection timeout" };
+        }
+        return okIo.getOpenIssues(hostname, repo);
+      },
+    };
+
+    const result = await router.runBoardSweep(["xpufx-org/paseo", "xpufx-org/failed-repo"], compositeIo);
+    assert.equal(result.ok, true);
+    assert.equal(result.notified, 1, "failed repo check should notify Front Desk");
+    assert.equal(deliveries.length, 1);
+
+    const alertMsg = deliveries[0].prompt;
+    assert.ok(alertMsg.includes("FAILED board check"), "must contain failed check section");
+    assert.ok(alertMsg.includes("failed-repo: check failed (connection timeout)"), "must name the failing repo and error");
+    assert.ok(!alertMsg.includes("with actionable tickets"), "must NOT dump the 0-dispatchable tickets section");
+  });
+
   it("suppresses notification when ticket has category 'feedback' on orchestrator issue without attention/frontdesk (#1357)", async () => {
     const deliveries: Array<{ agentId: string; prompt: string }> = [];
     const mockPaseo = {
