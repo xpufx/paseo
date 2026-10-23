@@ -134,6 +134,78 @@ partial-failure cleanup, and validation).
 ## Out of scope for Phase 0
 
 - No plugin is migrated to feature modules yet (Phase 2).
-- No feature-module dependency resolution in `paseo-plugin.json` (Phase 3).
 - No scaffolding or shared feature test harness (Phase 5).
 - No UI is removed here; #924 owns UI extraction.
+
+
+## Phase 3 — plugin-to-plugin feature dependencies
+
+A plugin may declare that it depends on feature modules provided by another
+plugin in its `paseo-plugin.json`:
+
+```json
+{
+  "id": "my-plugin",
+  "requirements": { "paseo": ">=0.9.0" },
+  "dependencies": {
+    "top": ["top-custom-pills", "top-timeline-telemetry"],
+    "permission-audit": ["permission-audit"]
+  }
+}
+```
+
+`dependencies` is an optional map of **provider plugin id** -> array of
+**feature module ids** that the depending plugin needs at runtime. Both keys
+and values must be non-empty strings; module id arrays must not contain
+duplicates.
+
+### Validation (CLI)
+
+`paseo-plugin-helper audit` validates the shape of `dependencies` and reports
+`invalid-feature-dependencies` (error) when:
+
+- `dependencies` is not an object,
+- a plugin id is empty/whitespace,
+- a value is not an array,
+- an entry is not a non-empty string, or
+- an array contains duplicate ids.
+
+### Runtime resolution
+
+Use `resolveFeatureDependencies` (available from `paseo-plugin-helper/shared`
+and `paseo-plugin-helper/server`) to validate and resolve declared dependencies
+against installed/running plugins:
+
+```ts
+import { resolveFeatureDependencies } from "paseo-plugin-helper/server";
+
+const resolution = await resolveFeatureDependencies(manifest.dependencies, context);
+if (!resolution.satisfied) {
+  // resolution.missingPlugins / resolution.missingFeatures describe the gap
+}
+```
+
+The resolver returns:
+
+| Field | Meaning |
+| :--- | :--- |
+| `satisfied` / `ok` | True when every declared dependency is available. |
+| `valid` | True when the declaration is well-formed. |
+| `dependencies` | Per-provider records (`pluginId`, `featureModuleIds`, `available`, `missingFeatureModuleIds`, `satisfied`). |
+| `missingPlugins` | Provider plugin ids that are not installed/enabled/running. |
+| `missingFeatures` | Providers whose requested module ids are not exposed. |
+| `errors` | Shape validation errors. |
+| `resolved` / `missing` | Convenience partitions of `dependencies`. |
+
+A pure, synchronous variant is available from `paseo-plugin-helper/shared` that
+resolves against an explicit feature registry instead of the daemon:
+
+```ts
+import { resolveFeatureDependencies } from "paseo-plugin-helper/shared";
+
+const resolution = resolveFeatureDependencies(manifest.dependencies, {
+  availableFeatures: {
+    top: ["top-custom-pills", "top-timeline-telemetry"],
+  },
+});
+```

@@ -242,3 +242,5 @@ export function composeFeatureModules<
     },
   };
 }
+
+export * from "./feature-dependencies.js";

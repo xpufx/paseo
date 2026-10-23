@@ -1,3 +1,11 @@
+import {
+  validateFeatureDependencies,
+  type FeatureDependencyInput,
+  type FeatureDependencyMap,
+  type FeatureDependencyResolution,
+  type ResolvedFeatureDependency,
+  type FeatureDependencyValidationError,
+} from "../shared/feature-dependencies.js";
 import { safeSpawn } from "./process.js";
 import fs from "node:fs";
 import path from "node:path";
@@ -322,4 +330,139 @@ export async function isPluginRunning(
 ): Promise<boolean> {
   const info = await getPluginInfo(pluginId, options);
   return info !== null && info.status === "running";
+}
+
+export interface ServerResolveFeatureDependenciesOptions extends PluginQueryOptions {
+  /** Optional context for plugin presence (preferred over daemon CLI). */
+  context?: PluginRegistryContext | null;
+  /** Map of provider plugin id -> feature module ids it exposes. */
+  availableFeatures?: Record<string, readonly string[]> | Map<string, readonly string[]> | null;
+}
+
+function isDepsLike(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const v = value as Record<string, unknown>;
+  if ("dependencies" in v) return true;
+  return Object.values(v).every((x) => Array.isArray(x));
+}
+
+function extractDependencies(input: unknown): FeatureDependencyInput {
+  if (input && typeof input === "object" && !Array.isArray(input) && "dependencies" in (input as Record<string, unknown>)) {
+    return input as { dependencies?: FeatureDependencyMap };
+  }
+  return input as FeatureDependencyInput;
+}
+
+/**
+ * Resolve declared feature dependencies at runtime against installed/running
+ * plugins.
+ *
+ * Accepts flexible argument ordering:
+ *   resolveFeatureDependencies(dependencies, contextOrOptions?, maybeOptions?)
+ *   resolveFeatureDependencies(context, dependencies, maybeOptions?)
+ */
+export async function resolveFeatureDependencies(
+  first: unknown,
+  second?: unknown,
+  third?: unknown,
+): Promise<FeatureDependencyResolution> {
+  let depsInput: unknown = first;
+  let contextOrOptions: unknown = second;
+  let maybeOptions: unknown = third;
+
+  if (isRegistryContext(first) && isDepsLike(second)) {
+    depsInput = second;
+    contextOrOptions = first;
+  }
+
+  const dependencies = extractDependencies(depsInput);
+  const errors = validateFeatureDependencies(dependencies);
+
+  let options: ServerResolveFeatureDependenciesOptions = {};
+  if (contextOrOptions && (isRegistryContext(contextOrOptions) || contextOrOptions === null)) {
+    options = { ...((maybeOptions && typeof maybeOptions === "object" && !Array.isArray(maybeOptions)) ? (maybeOptions as ServerResolveFeatureDependenciesOptions) : {}) };
+  } else if (contextOrOptions && typeof contextOrOptions === "object" && !Array.isArray(contextOrOptions)) {
+    options = { ...(contextOrOptions as ServerResolveFeatureDependenciesOptions) };
+    contextOrOptions = null;
+  }
+  if (maybeOptions && typeof maybeOptions === "object" && !Array.isArray(maybeOptions) && contextOrOptions && (isRegistryContext(contextOrOptions) || contextOrOptions === null)) {
+    options = { ...options, ...(maybeOptions as ServerResolveFeatureDependenciesOptions) };
+  }
+
+  const context = (options.context !== undefined ? options.context : (isRegistryContext(contextOrOptions) || contextOrOptions === null ? contextOrOptions : null)) as PluginRegistryContext | null;
+
+  let pluginList: Array<{ id: string; status?: string; enabled?: boolean }> = [];
+  try {
+    if (isRegistryContext(context) || context === null) {
+      pluginList = (await listPlugins(context, { cacheTtlMs: options.cacheTtlMs, forceRefresh: options.forceRefresh ?? true })) as Array<{ id: string; status?: string; enabled?: boolean }>;
+    } else if (isRegistryContext(contextOrOptions) || contextOrOptions === null) {
+      pluginList = (await listPlugins(contextOrOptions as PluginRegistryContext | null, { cacheTtlMs: options.cacheTtlMs, forceRefresh: options.forceRefresh ?? true })) as Array<{ id: string; status?: string; enabled?: boolean }>;
+    } else {
+      pluginList = (await listPlugins({ cacheTtlMs: options.cacheTtlMs, forceRefresh: options.forceRefresh ?? true })) as Array<{ id: string; status?: string; enabled?: boolean }>;
+    }
+  } catch {
+    pluginList = [];
+  }
+
+  const availMap = options.availableFeatures instanceof Map
+    ? options.availableFeatures
+    : options.availableFeatures && typeof options.availableFeatures === "object"
+    ? new Map(Object.entries(options.availableFeatures as Record<string, readonly string[]>))
+    : null;
+
+  const normalized = (dependencies && typeof dependencies === "object" && !Array.isArray(dependencies) && "dependencies" in (dependencies as Record<string, unknown>))
+    ? (((dependencies as { dependencies?: FeatureDependencyMap }).dependencies) ?? {})
+    : (dependencies as FeatureDependencyMap) ?? {};
+
+  const records: ResolvedFeatureDependency[] = [];
+  const missingPlugins: string[] = [];
+  const missingFeatures: Array<{ pluginId: string; featureModuleIds: string[] }> = [];
+
+  for (const [pluginId, value] of Object.entries(normalized as Record<string, unknown>)) {
+    const requested = Array.isArray(value) ? value.filter((v) => typeof v === "string") as string[] : [];
+    const match = pluginList.find((p) => p.id === pluginId);
+    const installed = !!match;
+    const enabled = match ? match.enabled !== false : false;
+    const status = match ? String(match.status ?? "") : "";
+    const running = installed && enabled && status === "running";
+    const available = running;
+
+    const provided = availMap ? (availMap.get(pluginId) ?? null) : null;
+    let missingModules: string[] = [];
+    if (availMap) {
+      if (provided) {
+        const providedSet = new Set(provided);
+        missingModules = requested.filter((m) => !providedSet.has(m));
+      } else {
+        missingModules = [...requested];
+      }
+    }
+
+    const satisfied = available && missingModules.length === 0;
+    const record: ResolvedFeatureDependency = {
+      pluginId,
+      featureModuleIds: requested,
+      available,
+      missingFeatureModuleIds: missingModules,
+      satisfied,
+    };
+    records.push(record);
+    if (!available) missingPlugins.push(pluginId);
+    if (missingModules.length > 0) missingFeatures.push({ pluginId, featureModuleIds: missingModules });
+  }
+
+  const allSatisfied = errors.length === 0 && records.every((r) => r.satisfied);
+  const resolution: FeatureDependencyResolution = {
+    satisfied: allSatisfied,
+    dependencies: records,
+    missingPlugins,
+    missingFeatures,
+    errors: errors as FeatureDependencyValidationError[],
+    ok: allSatisfied,
+    valid: errors.length === 0,
+    resolved: records.filter((r) => r.satisfied),
+    missing: records.filter((r) => !r.satisfied),
+  };
+
+  return resolution;
 }

@@ -10,3 +10,4 @@ export * from "./custom-pills.js";
 export * from "./forge.js";
 export * from "./highlight.js";
 export * from "./tickets.js";
+export * from "./feature-dependencies.js";

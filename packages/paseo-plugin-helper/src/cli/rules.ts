@@ -177,4 +177,11 @@ export const AUDIT_RULES: Record<string, AuditRule> = {
       "Use fluid layout (width: '100%') without flex: 1 or minHeight: 0 so host scroller (BottomSheetScrollView) measures full content height",
     docUrl: "https://github.com/xpufx/paseo-plugin-helper/blob/main/docs/client-migration.md",
   },
+
+  "invalid-feature-dependencies": {
+    id: "invalid-feature-dependencies",
+    severity: "error",
+    description: "paseo-plugin.json declares an invalid `dependencies` map (plugin id -> feature module ids).",
+    replacement: "Use \"dependencies\": { \"<plugin-id>\": [\"<feature-module-id>\", ...] }",
+  },
 };

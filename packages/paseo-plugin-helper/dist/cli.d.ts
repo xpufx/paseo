@@ -65,10 +65,14 @@ interface AuditRule {
  * The only client files permitted to contain raw color literals: a plugin's own
  * appearance module, where a literal palette is the file's reason to exist and
  * is not host-theme-driven by design. Keyed by plugin directory name, values are
- * plugin-relative POSIX paths. This is the structural exemption the
- * `no-raw-color-literal` rule uses for xpufx-org/paseo#629 / T10
- * (`worktree-install` deliberately ships its own palette). `addTheme`
- * contributions are exempted inside the scanner by call span, not by path.
+ * plugin-relative POSIX paths. `addTheme` contributions are exempted inside the
+ * scanner by call span, not by path.
+ *
+ * Empty today: every plugin in this tree reads its colors from the host theme,
+ * so none of them ships a local palette. `worktree-install` was the last one —
+ * the xpufx-org/paseo#629 / T10 "no shared kit" proof — and it was removed in
+ * #1493. The registry stays so a plugin that genuinely owns a literal palette
+ * can declare itself here rather than loosening the rule for everyone.
  *
  * A `conformance.json` exemption for `no-raw-color-literal` is deliberately
  * ignored: the theme seam must not be no-op-able from a manifest.

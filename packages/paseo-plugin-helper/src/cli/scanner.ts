@@ -784,6 +784,49 @@ export function auditProject(targetDir: string, options: AuditOptions = {}): Aud
           hasV8Entries ? undefined : "warn",
         );
       }
+
+      // Validate optional `dependencies` (plugin id -> feature module ids).
+      const deps = manifest && typeof manifest === "object" ? (manifest as any).dependencies : undefined;
+      if (deps !== undefined) {
+        const errors: string[] = [];
+        if (deps === null || typeof deps !== "object" || Array.isArray(deps)) {
+          errors.push("dependencies must be an object mapping plugin id to an array of feature module ids");
+        } else {
+          for (const [pluginId, value] of Object.entries(deps as Record<string, unknown>)) {
+            if (typeof pluginId !== "string" || pluginId.trim().length === 0) {
+              errors.push("dependency plugin id must be a non-empty string");
+              continue;
+            }
+            if (!Array.isArray(value)) {
+              errors.push(`dependencies["${pluginId}"] must be an array of feature module ids`);
+              continue;
+            }
+            const seen = new Set<string>();
+            for (const moduleId of value) {
+              if (typeof moduleId !== "string" || moduleId.trim().length === 0) {
+                errors.push(`dependencies["${pluginId}"] contains an invalid feature module id`);
+              } else if (seen.has(moduleId)) {
+                errors.push(`dependencies["${pluginId}"] contains duplicate feature module id "${moduleId}"`);
+              }
+              seen.add(String(moduleId));
+            }
+          }
+        }
+        if (errors.length > 0) {
+          const rule = AUDIT_RULES["invalid-feature-dependencies"];
+          issues.push({
+            ruleId: rule.id,
+            severity: rule.severity,
+            file: "paseo-plugin.json",
+            line: 1,
+            column: 0,
+            message: `${rule.description} (${errors[0]})`,
+            codeSnippet: "dependencies",
+            replacement: rule.replacement,
+            docUrl: rule.docUrl,
+          });
+        }
+      }
     }
   } catch {
     // Unparseable manifest is the daemon's complaint, not the audit's

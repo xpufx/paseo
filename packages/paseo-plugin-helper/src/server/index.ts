@@ -20,3 +20,4 @@ export * from "./tickets.js";
 export * from "./storage-guard.js";
 export * from "./telemetry.js";
 
+export * from "./feature-dependencies.js";

@@ -1,6 +1,89 @@
-import { P as PluginRpcContract } from './rpc-D27pph91.js';
+import { P as PluginRpcContract } from './rpc-D27pph91.cjs';
 import { z } from 'zod';
-import { S as StatusVariant } from './types-4TBN5lgi.js';
+import { S as StatusVariant } from './types-4TBN5lgi.cjs';
+
+/**
+ * Phase 3 — plugin-to-plugin feature dependencies.
+ *
+ * A plugin manifest (`paseo-plugin.json`) may declare:
+ *
+ * ```json
+ * {
+ *   "dependencies": {
+ *     "top": ["top-custom-pills", "top-timeline-telemetry"]
+ *   }
+ * }
+ * ```
+ *
+ * i.e. `dependencies` is an optional map of *provider plugin id* -> array of
+ * *feature module ids* that the depending plugin needs at runtime.
+ *
+ * This module provides:
+ *  - {@link validateFeatureDependencies} — pure shape validation used by the
+ *    CLI conformance rules and by runtime resolvers.
+ *  - {@link resolveFeatureDependencies} — pure resolution against a provided
+ *    feature registry (plugin id -> feature module ids it exposes). The
+ *    server-side runtime resolver in `paseo-plugin-helper/server` wraps this
+ *    with installed/running plugin discovery.
+ */
+type FeatureDependencyMap = Record<string, readonly string[]>;
+interface FeatureDependencyDeclaration {
+    dependencies?: FeatureDependencyMap;
+}
+type FeatureDependencyInput = FeatureDependencyMap | FeatureDependencyDeclaration | null | undefined;
+interface FeatureDependencyValidationError {
+    pluginId?: string;
+    featureModuleId?: string;
+    message: string;
+}
+interface ResolvedFeatureDependency {
+    /** Provider plugin id. */
+    pluginId: string;
+    /** Requested feature module ids. */
+    featureModuleIds: string[];
+    /** True when the provider is available (running / registered). */
+    available: boolean;
+    /** Requested module ids the provider does not expose. */
+    missingFeatureModuleIds: string[];
+    /** True when every requested module id is available. */
+    satisfied: boolean;
+}
+interface FeatureDependencyResolution {
+    /** True when every declared dependency is satisfied. */
+    satisfied: boolean;
+    /** Per-provider resolution records. */
+    dependencies: ResolvedFeatureDependency[];
+    /** Provider ids that are unavailable. */
+    missingPlugins: string[];
+    /** Providers with missing feature module ids. */
+    missingFeatures: Array<{
+        pluginId: string;
+        featureModuleIds: string[];
+    }>;
+    /** Shape / validation errors. */
+    errors: FeatureDependencyValidationError[];
+    ok: boolean;
+    valid: boolean;
+    resolved: ResolvedFeatureDependency[];
+    missing: ResolvedFeatureDependency[];
+}
+/**
+ * Pure shape validation for a `dependencies` declaration.
+ *
+ * Returns the list of validation errors (empty when valid). Never throws.
+ */
+declare function validateFeatureDependencies(input: FeatureDependencyInput): FeatureDependencyValidationError[];
+interface ResolveFeatureDependenciesOptions {
+    /** Map of provider plugin id -> feature module ids that provider exposes. */
+    availableFeatures?: Record<string, readonly string[]> | Map<string, readonly string[]> | null;
+}
+/**
+ * Resolve a declared dependency map against a registry of available features.
+ *
+ * When `availableFeatures` is omitted, every well-formed dependency is treated
+ * as resolvable (plugin presence is checked by the server-side resolver).
+ */
+declare function resolveFeatureDependencies(input: FeatureDependencyInput, availableFeatures?: ResolveFeatureDependenciesOptions["availableFeatures"] | ResolveFeatureDependenciesOptions, options?: ResolveFeatureDependenciesOptions): FeatureDependencyResolution;
 
 /**
  * Cleanup handle returned by a feature contribution.
@@ -874,4 +957,4 @@ declare function paseoLabelSet(): LabelDefinition[];
 declare function paseoLabelScopes(): string[];
 declare function planLabelSetInstall(existing: ForgeLabelRef[], mode: InstallLabelMode): LabelSetPlan;
 
-export { type IssueDetailOutput as $, ATTENTION_LABELS as A, BARE_REPO_PATTERN as B, CREATE_ISSUE_BODY_MAX as C, ForgeContextInputSchema as D, type ForgeContextOutput as E, type FeatureComposition as F, ForgeContextOutputSchema as G, type ForgeIssue as H, ForgeIssueSchema as I, type ForgeLabel as J, type ForgeLabelRef as K, ForgeLabelSchema as L, type ForgeRemote as M, type ForgeRepoIdentity as N, type ForgeTargetResolution as O, type ForgeVisibility as P, INSTALL_LABEL_MODES as Q, type InstallLabelMode as R, type InstallLabelsInput as S, InstallLabelsInputSchema as T, type InstallLabelsOutput as U, InstallLabelsOutputSchema as V, type IssueComment as W, IssueCommentSchema as X, type IssueDetail as Y, type IssueDetailInput as Z, IssueDetailInputSchema as _, type AddCommentInput as a, resolveCustomPillStatus as a$, IssueDetailOutputSchema as a0, IssueDetailSchema as a1, IssueNumberInput as a2, LABEL_ALIASES as a3, LEGACY_ATTENTION_LABELS as a4, LEGACY_PRIORITY_ORDER as a5, LEGACY_SPEC_LABELS as a6, LEGACY_STATE_ORDER as a7, type LabelDefinition as a8, type LabelSetPlan as a9, canonicalLabel as aA, composeFeatureModules as aB, createIssueContract as aC, currentPriorityLabel as aD, currentStateLabel as aE, deriveForgeAccess as aF, forgeCapabilityFromRepo as aG, forgeContextContract as aH, forgeWriteScopeList as aI, formatPillDisplay as aJ, isValidForgeTarget as aK, issueDetailContract as aL, liveScopesFromIssues as aM, liveScopesFromLabels as aN, nextStateLabel as aO, normalizeIssueNumber as aP, openIssuesContract as aQ, parseAgentEnvelope as aR, parseForgeRemote as aS, parseLabelList as aT, parseMarkdownLite as aU, parseMarkdownLiteInline as aV, parseNumericPillValue as aW, paseoLabelScopes as aX, paseoLabelSet as aY, planLabelSetInstall as aZ, rankIssues as a_, type MarkdownLiteBlock as aa, type MarkdownLiteSpan as ab, type OpenIssuesInput as ac, OpenIssuesInputSchema as ad, type OpenIssuesOutput as ae, OpenIssuesOutputSchema as af, PASEO_LABEL_SCOPES as ag, PASEO_LINK_PATTERN as ah, PASEO_SERVER_PATTERN as ai, PRIORITY_ORDER as aj, type PriorityLabel as ak, SHA_PATTERN as al, SPEC_LABELS as am, STATE_ORDER as an, type SearchIssuesInput as ao, SearchIssuesInputSchema as ap, type SearchIssuesOutput as aq, SearchIssuesOutputSchema as ar, type SetLabelInput as as, SetLabelInputSchema as at, type SetLabelOutput as au, SetLabelOutputSchema as av, type SpecLabel as aw, type StateLabel as ax, activeForgeForDirectory as ay, addCommentContract as az, AddCommentInputSchema as b, resolveForgeTarget as b0, sameLabel as b1, scopeOfLabel as b2, searchIssuesContract as b3, setLabelContract as b4, shortLabelName as b5, stripAgentEnvelopeFooter as b6, validateCreateIssueInput as b7, writeGateNotice as b8, type AddCommentOutput as c, AddCommentOutputSchema as d, type AgentEnvelope as e, AgentEnvelopeSchema as f, type AttentionLabel as g, CREATE_ISSUE_LABEL_MAX as h, CREATE_ISSUE_TITLE_MAX as i, type CreateIssueInput as j, CreateIssueInputSchema as k, type CreateIssueOutput as l, CreateIssueOutputSchema as m, type CustomPillDefinition as n, CustomPillDefinitionSchema as o, type CustomPillModal as p, CustomPillModalSchema as q, type CustomPillState as r, type CustomPillThresholds as s, CustomPillThresholdsSchema as t, type FeatureDisposer as u, type FeatureModule as v, type ForgeAccessInput as w, type ForgeAccessState as x, type ForgeAuthState as y, type ForgeContextInput as z };
+export { type IssueComment as $, ATTENTION_LABELS as A, BARE_REPO_PATTERN as B, CREATE_ISSUE_BODY_MAX as C, type FeatureModule as D, type ForgeAccessInput as E, type FeatureComposition as F, type ForgeAccessState as G, type ForgeAuthState as H, type ForgeContextInput as I, ForgeContextInputSchema as J, type ForgeContextOutput as K, ForgeContextOutputSchema as L, type ForgeIssue as M, ForgeIssueSchema as N, type ForgeLabel as O, type ForgeLabelRef as P, ForgeLabelSchema as Q, type ForgeRemote as R, type ForgeRepoIdentity as S, type ForgeTargetResolution as T, type ForgeVisibility as U, INSTALL_LABEL_MODES as V, type InstallLabelMode as W, type InstallLabelsInput as X, InstallLabelsInputSchema as Y, type InstallLabelsOutput as Z, InstallLabelsOutputSchema as _, type AddCommentInput as a, parseMarkdownLite as a$, IssueCommentSchema as a0, type IssueDetail as a1, type IssueDetailInput as a2, IssueDetailInputSchema as a3, type IssueDetailOutput as a4, IssueDetailOutputSchema as a5, IssueDetailSchema as a6, IssueNumberInput as a7, LABEL_ALIASES as a8, LEGACY_ATTENTION_LABELS as a9, SetLabelInputSchema as aA, type SetLabelOutput as aB, SetLabelOutputSchema as aC, type SpecLabel as aD, type StateLabel as aE, activeForgeForDirectory as aF, addCommentContract as aG, canonicalLabel as aH, composeFeatureModules as aI, createIssueContract as aJ, currentPriorityLabel as aK, currentStateLabel as aL, deriveForgeAccess as aM, forgeCapabilityFromRepo as aN, forgeContextContract as aO, forgeWriteScopeList as aP, formatPillDisplay as aQ, isValidForgeTarget as aR, issueDetailContract as aS, liveScopesFromIssues as aT, liveScopesFromLabels as aU, nextStateLabel as aV, normalizeIssueNumber as aW, openIssuesContract as aX, parseAgentEnvelope as aY, parseForgeRemote as aZ, parseLabelList as a_, LEGACY_PRIORITY_ORDER as aa, LEGACY_SPEC_LABELS as ab, LEGACY_STATE_ORDER as ac, type LabelDefinition as ad, type LabelSetPlan as ae, type MarkdownLiteBlock as af, type MarkdownLiteSpan as ag, type OpenIssuesInput as ah, OpenIssuesInputSchema as ai, type OpenIssuesOutput as aj, OpenIssuesOutputSchema as ak, PASEO_LABEL_SCOPES as al, PASEO_LINK_PATTERN as am, PASEO_SERVER_PATTERN as an, PRIORITY_ORDER as ao, type PriorityLabel as ap, type ResolveFeatureDependenciesOptions as aq, type ResolvedFeatureDependency as ar, SHA_PATTERN as as, SPEC_LABELS as at, STATE_ORDER as au, type SearchIssuesInput as av, SearchIssuesInputSchema as aw, type SearchIssuesOutput as ax, SearchIssuesOutputSchema as ay, type SetLabelInput as az, AddCommentInputSchema as b, parseMarkdownLiteInline as b0, parseNumericPillValue as b1, paseoLabelScopes as b2, paseoLabelSet as b3, planLabelSetInstall as b4, rankIssues as b5, resolveCustomPillStatus as b6, resolveFeatureDependencies as b7, resolveForgeTarget as b8, sameLabel as b9, scopeOfLabel as ba, searchIssuesContract as bb, setLabelContract as bc, shortLabelName as bd, stripAgentEnvelopeFooter as be, validateCreateIssueInput as bf, validateFeatureDependencies as bg, writeGateNotice as bh, type AddCommentOutput as c, AddCommentOutputSchema as d, type AgentEnvelope as e, AgentEnvelopeSchema as f, type AttentionLabel as g, CREATE_ISSUE_LABEL_MAX as h, CREATE_ISSUE_TITLE_MAX as i, type CreateIssueInput as j, CreateIssueInputSchema as k, type CreateIssueOutput as l, CreateIssueOutputSchema as m, type CustomPillDefinition as n, CustomPillDefinitionSchema as o, type CustomPillModal as p, CustomPillModalSchema as q, type CustomPillState as r, type CustomPillThresholds as s, CustomPillThresholdsSchema as t, type FeatureDependencyDeclaration as u, type FeatureDependencyInput as v, type FeatureDependencyMap as w, type FeatureDependencyResolution as x, type FeatureDependencyValidationError as y, type FeatureDisposer as z };
