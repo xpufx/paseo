@@ -1144,8 +1144,10 @@ async function resolveIssuesCheckToken(hostname: string): Promise<string | null>
  * callers and tests keep working. New callers omit it and get the fetch path.
  */
 export function createDefaultIssuesCheckIo(runner?: TeaxRunner): IssuesCheckIo {
-  if (typeof runner === "function") {
-    // Legacy teax transport (kept for backwards compatibility).
+  const useTeax = typeof runner === "function" || Boolean(process.env.UPPIDI_FLEET_TEST_TEAX);
+  const effectiveRunner = typeof runner === "function" ? runner : teaxRun;
+  if (useTeax) {
+    // Legacy teax transport (kept for backwards compatibility and test harnesses).
     return {
       async getOpenIssues(hostname, repo) {
         const allIssues: ForgejoIssue[] = [];
@@ -1153,7 +1155,7 @@ export function createDefaultIssuesCheckIo(runner?: TeaxRunner): IssuesCheckIo {
         const maxPages = 20;
 
         for (let page = 1; page <= maxPages; page++) {
-          const res = await runner([
+          const res = await effectiveRunner([
             "api",
             `repos/${repo}/issues?state=open&sort=updated&order=desc&limit=${limit}&page=${page}`,
             "--hostname",
@@ -1180,7 +1182,7 @@ export function createDefaultIssuesCheckIo(runner?: TeaxRunner): IssuesCheckIo {
       },
 
       async getLatestComments(hostname, repo, issueNumber, count = 3) {
-        const res = await runner(["api", `repos/${repo}/issues/${issueNumber}/comments`, "--hostname", hostname]);
+        const res = await effectiveRunner(["api", `repos/${repo}/issues/${issueNumber}/comments`, "--hostname", hostname]);
         if (res.code !== 0) return [];
         const out = res.stdout.trim();
         if (!out) return [];
@@ -1189,7 +1191,7 @@ export function createDefaultIssuesCheckIo(runner?: TeaxRunner): IssuesCheckIo {
       },
 
       async getIssueComments(hostname, repo, issueNumber) {
-        const res = await runner(["api", `repos/${repo}/issues/${issueNumber}/comments`, "--hostname", hostname]);
+        const res = await effectiveRunner(["api", `repos/${repo}/issues/${issueNumber}/comments`, "--hostname", hostname]);
         if (res.code !== 0) return [];
         const out = res.stdout.trim();
         if (!out) return [];

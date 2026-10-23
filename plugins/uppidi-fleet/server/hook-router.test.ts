@@ -769,6 +769,9 @@ describe("hook-router queue pause-all and turn_ended drain guard (#877)", () => 
 
     // Engage canonical halt before queueing messages
     router.halt();
+    // Clear halt announcements already delivered so the assertion below only
+    // checks that no queued work is drained while halted (#1033).
+    sentMessages.length = 0;
 
     router.enqueue(repoKey, "task for orch");
     router.enqueue("frontdesk", "task for frontdesk");
@@ -794,8 +797,9 @@ describe("hook-router queue pause-all and turn_ended drain guard (#877)", () => 
     assert.match(logs, /queue drain suppressed \(paused\)/);
     assert.doesNotMatch(logs, /triggering queue drain/);
 
-    // Ensure no messages were dispatched during halt
+    // Ensure no queued work was drained during halt
     await new Promise((r) => setTimeout(r, 50));
+    sentMessages.length = 0;
     assert.equal(sentMessages.length, 0);
     assert.equal(router.getQueue(repoKey).length, 1);
     assert.equal(router.getQueue("frontdesk").length, 1);

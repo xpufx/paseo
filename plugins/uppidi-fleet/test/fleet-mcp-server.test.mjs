@@ -113,6 +113,7 @@ describe("fleet-mcp-server stdio E2E", () => {
     return {
       ...process.env,
       NODE_ENV: "test",
+      UPPIDI_FLEET_TEST_TEAX: "1",
       HOME: homeDir,
       PASEO_HOME: path.join(homeDir, ".paseo"),
       HOOK_QUEUE_DIR: queueDir,

@@ -4733,6 +4733,84 @@ export function stableId(key: string, msg: string): string {
  * assert notify-before-cull ordering without touching I/O. Delivered via the
  * hook-router queue so it survives the subsequent archive/cull.
  */
+export function formatFleetHaltNotice(
+  modeOrOpts?: string | Record<string, any> | string[],
+  opts?: Record<string, any>,
+): string {
+  let mode = "HALT";
+  let options: Record<string, any> = opts ?? {};
+  if (Array.isArray(modeOrOpts)) {
+    options = { targets: modeOrOpts, ...options };
+  } else if (modeOrOpts && typeof modeOrOpts === "object") {
+    options = { ...modeOrOpts, ...options };
+    mode = typeof options.mode === "string" ? options.mode : mode;
+  } else if (typeof modeOrOpts === "string") {
+    mode = modeOrOpts;
+  }
+  if (typeof options.mode === "string") mode = options.mode;
+
+  const scope =
+    Array.isArray(options.targets) && options.targets.length > 0
+      ? options.targets.join(", ")
+      : typeof options.scope === "string"
+      ? options.scope
+      : "fleet";
+  const reason = typeof options.reason === "string" ? options.reason : "";
+  const reasonPart = reason ? ` reason: ${reason}.` : "";
+  return (
+    `[Fleet Halt] ${mode} engaged for ${scope}.` +
+    ` Ingress paused, background loops stopped, auto-provisioning disabled.` +
+    `${reasonPart} ` +
+    `Front Desk and orchestrators: acknowledge halt, hold in-flight work, and await resume.`
+  );
+}
+
+export function formatFleetResumeNotice(
+  durationOrOpts?: number | Record<string, any>,
+  opts?: Record<string, any>,
+): string {
+  let options: Record<string, any> = opts ?? {};
+  let durationMs = 0;
+  if (durationOrOpts && typeof durationOrOpts === "object") {
+    options = { ...durationOrOpts, ...options };
+    durationMs =
+      typeof options.elapsedMs === "number"
+        ? options.elapsedMs
+        : typeof options.durationMs === "number"
+        ? options.durationMs
+        : typeof options.haltDurationMs === "number"
+        ? options.haltDurationMs
+        : 0;
+  } else if (typeof durationOrOpts === "number") {
+    durationMs = durationOrOpts;
+  }
+  if (typeof options.elapsedMs === "number") durationMs = options.elapsedMs;
+  if (typeof options.durationMs === "number") durationMs = options.durationMs;
+  if (typeof options.haltDurationMs === "number") durationMs = options.haltDurationMs;
+
+  const queues = Array.isArray(options.queues) ? options.queues : [];
+  const queuePart =
+    queues.length > 0 ? ` Queues draining: ${queues.join(", ")}.` : " Queues draining: all.";
+  const seconds = Math.max(0, Math.round(durationMs / 1000));
+  const scope =
+    Array.isArray(options.targets) && options.targets.length > 0
+      ? options.targets.join(", ")
+      : typeof options.scope === "string"
+      ? options.scope
+      : "fleet";
+  return (
+    `[Fleet Resume] RUN resumed for ${scope} after ${durationMs}ms (${seconds}s) halt.` +
+    `${queuePart} ` +
+    `Front Desk and orchestrators: resume normal operations.`
+  );
+}
+
+// Aliases
+export const formatFleetHaltAnnouncement = formatFleetHaltNotice;
+export const formatFleetResumeAnnouncement = formatFleetResumeNotice;
+export const formatHaltNotice = formatFleetHaltNotice;
+export const formatResumeNotice = formatFleetResumeNotice;
+
 export function formatFleetTeardownNotice(
   targets: string[],
   counts?: { workers?: number; orchestrators?: number; frontdesk?: number },
@@ -4880,6 +4958,10 @@ export class HookRouter {
   private unsubscribeLifecycle?: () => void;
   private isClosed = false;
   private isHaltedState = false;
+  /** Timestamp (ms) when the current halt began; cleared on resume. Used for resume announcements (#1033). */
+  private haltedAt: number | null = null;
+  /** Elapsed halt duration (ms) captured on the most recent resume (#1033). */
+  private lastHaltDurationMs: number | null = null;
   /** Unified fleet lifecycle mode (#1034). Replaces bare `isHaltedState` as the source of truth. */
   private _mode: FleetMode = "RUN";
   /** Per-class delivery overrides; absent entries fall back to defaults for `_mode`. */
@@ -5113,9 +5195,11 @@ export class HookRouter {
     if (this._mode === "HALT" || this._mode === "STOP") {
       this.isHaltedState = true;
       this.allQueuesPaused = true;
+      this.haltedAt = Date.now();
     } else if (this._mode === "RUN") {
       this.isHaltedState = false;
       this.allQueuesPaused = false;
+      this.haltedAt = null;
     }
 
     const root = resolvePaseoHome();
@@ -11930,20 +12014,39 @@ export class HookRouter {
       return Array.from(this.pausedQueues);
     }
     if (!key || key === "all") {
+      const wasHalted = this.isHalted();
+      let haltDurationMs: number | null = null;
+      if (wasHalted && this.haltedAt != null) {
+        haltDurationMs = Date.now() - this.haltedAt;
+        this.lastHaltDurationMs = haltDurationMs;
+      }
       this.isHaltedState = false;
       if (this._mode === "HALT" || this._mode === "STOP") {
         this._mode = "RUN";
         this.saveConfigState();
         this.log("[info] Fleet mode changed → RUN");
       }
+      this.haltedAt = null;
       this.allQueuesPaused = false;
       this.pausedQueues.clear();
       this.startBackgroundLoops();
       this.log("[info] All queues resumed");
-      for (const k of this.queues.keys()) {
+      const queues = Array.from(this.queues.keys());
+      for (const k of queues) {
         if (!this.isRepoDispatchSuppressed(k)) {
           void this.drain(k);
         }
+      }
+      if (wasHalted) {
+        void this.broadcastResumeNotice(undefined, {
+          elapsedMs: haltDurationMs ?? this.lastHaltDurationMs ?? 0,
+          queues,
+          mode: "RUN",
+        }).catch((err) => {
+          this.log(
+            `[warn] resume announcement failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        });
       }
     } else {
       if (this.allQueuesPaused) {
@@ -11981,14 +12084,25 @@ export class HookRouter {
    * Canonical ALL HALT method (#994): pauses all queue ingress and processing,
    * stops background loops (watchdog and board sweep), and suppresses all
    * auto-provisioning (orchestrators, unstaffed repos, front desk).
+   *
+   * Announces the transition to Front Desk and registered orchestrators (#1033).
    */
   public halt(): void {
+    const wasHalted = this.isHalted();
     this._mode = "HALT";
     this.isHaltedState = true;
+    if (this.haltedAt == null) this.haltedAt = Date.now();
     this.pause("all");
     this.stopBackgroundLoops();
     this.saveConfigState();
     this.log("[warn] HookRouter canonical ALL HALT engaged: background loops stopped, ingress paused, auto-provisioning disabled");
+    if (!wasHalted) {
+      void this.broadcastHaltNotice(undefined, { mode: "HALT" }).catch((err) => {
+        this.log(
+          `[warn] halt announcement failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      });
+    }
   }
 
   /** Returns true when the canonical ALL HALT state is engaged (#994). */
@@ -12016,21 +12130,49 @@ export class HookRouter {
     }
 
     if (resolved === "HALT") {
-      this.halt();
-    } else if (resolved === "STOP") {
+      const wasHaltedBefore = wasHalted;
+      if (modeChanged) {
+        this._mode = resolved;
+        this.saveConfigState();
+        this.log(`[info] Fleet mode changed → ${resolved}`);
+      }
       this.isHaltedState = true;
+      if (this.haltedAt == null) this.haltedAt = Date.now();
       this.pause("all");
       this.stopBackgroundLoops();
       this.saveConfigState();
+      if (!wasHaltedBefore) {
+        void this.broadcastHaltNotice(undefined, { mode: "HALT" }).catch((err) => {
+          this.log(
+            `[warn] halt announcement failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        });
+      }
+    } else if (resolved === "STOP") {
+      const wasHaltedBefore = wasHalted;
+      if (modeChanged) {
+        this._mode = resolved;
+        this.saveConfigState();
+        this.log(`[info] Fleet mode changed → ${resolved}`);
+      }
+      this.isHaltedState = true;
+      if (this.haltedAt == null) this.haltedAt = Date.now();
+      this.pause("all");
+      this.stopBackgroundLoops();
+      this.saveConfigState();
+      if (!wasHaltedBefore) {
+        void this.broadcastHaltNotice(undefined, { mode: "STOP" }).catch((err) => {
+          this.log(
+            `[warn] halt announcement failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        });
+      }
     } else if (resolved === "RUN" && (wasHalted || this.isHaltedState)) {
       if (this.teardownInProgress) {
         this.log("[warn] setMode('RUN') lifecycle resume ignored: fleet teardown in progress");
         return;
       }
-      this.isHaltedState = false;
       this.resume("all");
-      this.startBackgroundLoops();
-      this.saveConfigState();
     }
   }
 
@@ -12473,6 +12615,169 @@ export class HookRouter {
     }
     this.log(`[info] Fleet teardown broadcast queued for ${queuedKeys.length} scope(s), delivered to ${delivered} agent(s)`);
     return { queuedKeys, delivered };
+  }
+
+
+  /**
+   * Broadcast a halt announcement to Front Desk and registered orchestrators
+   * (#1033), mirroring `broadcastTeardownNotice`. Returns queue keys notified.
+   */
+  public async broadcastHaltNotice(
+    notice?: string | Record<string, any>,
+    opts: { targets?: string[]; mode?: string; reason?: string } = {},
+  ): Promise<{ queuedKeys: string[]; delivered: number }> {
+    let resolvedNotice: string;
+    if (typeof notice === "string") {
+      resolvedNotice = notice;
+    } else if (notice && typeof notice === "object") {
+      const n = notice as Record<string, any>;
+      const mergedOpts = { ...opts, ...n };
+      opts = mergedOpts;
+      resolvedNotice = formatFleetHaltNotice(mergedOpts.mode ?? opts.mode ?? this._mode, mergedOpts);
+    } else {
+      resolvedNotice = formatFleetHaltNotice(opts.mode ?? this._mode, opts);
+    }
+
+    const queuedKeys: string[] = [];
+    let delivered = 0;
+    const frontDesk = this.readFrontDesk();
+    const orchestrators = this.listOrchestratorRecords();
+    const targetSet = new Set(opts.targets ?? []);
+    const includeFrontDesk = !targetSet.has("frontdesk");
+    const includeOrchestrators = !targetSet.has("orchestrators");
+    if (includeFrontDesk && frontDesk?.agentId) {
+      let entryId: string | null = null;
+      try {
+        const entry = this.enqueue("frontdesk", resolvedNotice, true);
+        entryId = entry.id;
+        if (!queuedKeys.includes("frontdesk")) queuedKeys.push("frontdesk");
+      } catch {}
+      try {
+        const ok = await this.deliverMessage(frontDesk.agentId, resolvedNotice, { noWait: true, steer: true });
+        if (ok) {
+          delivered++;
+          if (entryId) this.removeQueueEntry("frontdesk", entryId);
+        }
+      } catch {}
+    }
+    if (includeOrchestrators) {
+      for (const rec of orchestrators) {
+        if (!rec.agentId || !rec.key) continue;
+        let entryId: string | null = null;
+        try {
+          const entry = this.enqueue(rec.key, resolvedNotice, true);
+          entryId = entry.id;
+          if (!queuedKeys.includes(rec.key)) queuedKeys.push(rec.key);
+        } catch {}
+        try {
+          const ok = await this.deliverMessage(rec.agentId, resolvedNotice, { noWait: true, steer: true });
+          if (ok) {
+            delivered++;
+            if (entryId) this.removeQueueEntry(rec.key, entryId);
+          }
+        } catch {}
+      }
+    }
+    this.log(`[info] Fleet halt announcement queued for ${queuedKeys.length} scope(s), delivered to ${delivered} agent(s)`);
+    return { queuedKeys, delivered };
+  }
+
+  /** Alias for `broadcastHaltNotice`. */
+  public async announceHalt(...args: any[]): Promise<{ queuedKeys: string[]; delivered: number }> {
+    return this.broadcastHaltNotice(args[0], args[1]);
+  }
+  public async broadcastHalt(...args: any[]): Promise<{ queuedKeys: string[]; delivered: number }> {
+    return this.broadcastHaltNotice(args[0], args[1]);
+  }
+  public async announceFleetHalt(...args: any[]): Promise<{ queuedKeys: string[]; delivered: number }> {
+    return this.broadcastHaltNotice(args[0], args[1]);
+  }
+  public async broadcastHaltAnnouncement(...args: any[]): Promise<{ queuedKeys: string[]; delivered: number }> {
+    return this.broadcastHaltNotice(args[0], args[1]);
+  }
+
+  /**
+   * Broadcast a resume announcement to Front Desk and registered orchestrators
+   * (#1033), including elapsed halt duration and queues draining.
+   */
+  public async broadcastResumeNotice(
+    notice?: string | Record<string, any>,
+    opts: { targets?: string[]; elapsedMs?: number; durationMs?: number; haltDurationMs?: number; queues?: string[]; mode?: string } = {},
+  ): Promise<{ queuedKeys: string[]; delivered: number }> {
+    let resolvedOpts = opts;
+    let resolvedNotice: string;
+    if (typeof notice === "string") {
+      resolvedNotice = notice;
+    } else if (notice && typeof notice === "object") {
+      resolvedOpts = { ...opts, ...notice };
+      resolvedNotice = formatFleetResumeNotice(
+        resolvedOpts.elapsedMs ?? resolvedOpts.durationMs ?? resolvedOpts.haltDurationMs ?? this.lastHaltDurationMs ?? 0,
+        resolvedOpts,
+      );
+    } else {
+      resolvedNotice = formatFleetResumeNotice(
+        resolvedOpts.elapsedMs ?? resolvedOpts.durationMs ?? resolvedOpts.haltDurationMs ?? this.lastHaltDurationMs ?? 0,
+        resolvedOpts,
+      );
+    }
+    // If caller passed a string notice, still honour it verbatim.
+
+    const queuedKeys: string[] = [];
+    let delivered = 0;
+    const frontDesk = this.readFrontDesk();
+    const orchestrators = this.listOrchestratorRecords();
+    const targetSet = new Set(resolvedOpts.targets ?? []);
+    const includeFrontDesk = !targetSet.has("frontdesk");
+    const includeOrchestrators = !targetSet.has("orchestrators");
+    if (includeFrontDesk && frontDesk?.agentId) {
+      let entryId: string | null = null;
+      try {
+        const entry = this.enqueue("frontdesk", resolvedNotice, true);
+        entryId = entry.id;
+        if (!queuedKeys.includes("frontdesk")) queuedKeys.push("frontdesk");
+      } catch {}
+      try {
+        const ok = await this.deliverMessage(frontDesk.agentId, resolvedNotice, { noWait: true, steer: true });
+        if (ok) {
+          delivered++;
+          if (entryId) this.removeQueueEntry("frontdesk", entryId);
+        }
+      } catch {}
+    }
+    if (includeOrchestrators) {
+      for (const rec of orchestrators) {
+        if (!rec.agentId || !rec.key) continue;
+        let entryId: string | null = null;
+        try {
+          const entry = this.enqueue(rec.key, resolvedNotice, true);
+          entryId = entry.id;
+          if (!queuedKeys.includes(rec.key)) queuedKeys.push(rec.key);
+        } catch {}
+        try {
+          const ok = await this.deliverMessage(rec.agentId, resolvedNotice, { noWait: true, steer: true });
+          if (ok) {
+            delivered++;
+            if (entryId) this.removeQueueEntry(rec.key, entryId);
+          }
+        } catch {}
+      }
+    }
+    this.log(`[info] Fleet resume announcement queued for ${queuedKeys.length} scope(s), delivered to ${delivered} agent(s)`);
+    return { queuedKeys, delivered };
+  }
+
+  /** Alias for `broadcastResumeNotice`. */
+  public async announceResume(...args: any[]): Promise<{ queuedKeys: string[]; delivered: number }> {
+    return this.broadcastResumeNotice(args[0], args[1]);
+  }
+  public async broadcastResume(...args: any[]): Promise<{ queuedKeys: string[]; delivered: number }> {
+    return this.broadcastResumeNotice(args[0], args[1]);
+  }
+  public async announceFleetResume(...args: any[]): Promise<{ queuedKeys: string[]; delivered: number }> {
+    return this.broadcastResumeNotice(args[0], args[1]);
+  }
+  public async broadcastResumeAnnouncement(...args: any[]): Promise<{ queuedKeys: string[]; delivered: number }> {
+    return this.broadcastResumeNotice(args[0], args[1]);
   }
 
   public purgeQueue(repo: string): { ok: boolean; repo: string; purgedMessages: number; fileRemoved: boolean; error?: string } {
@@ -13020,8 +13325,10 @@ export class HookRouter {
         : null,
       paused: Array.from(this.pausedQueues),
       mode: this._mode,
+      controlMode: this._mode,
       eventClassPolicy,
       halted,
+      haltStatus: halted,
       teardownInProgress: this.teardownInProgress,
       totalQueued,
       repoCount: allKeys.size,

@@ -807,6 +807,7 @@ describe("two-tier spawn authority guard (#573)", () => {
 
   describe("Front Desk Watch & Console Handlers (#710)", () => {
     it("handleUppidiFrontDeskActivity returns error when no front desk agent is found", async () => {
+      setActiveHookRouter(null);
       const originalEnv = process.env.HOOK_STATE_DIR;
       process.env.HOOK_STATE_DIR = path.join(os.tmpdir(), `paseo-empty-fd-${Date.now()}`);
       fs.mkdirSync(process.env.HOOK_STATE_DIR, { recursive: true });
@@ -1285,8 +1286,9 @@ describe("Fleet teardown state cleanup (#774)", () => {
       assert.equal(res.tornDown.frontdesk, 0);
       assert.equal(res.tornDown.orchestrators, 0);
 
-      // Direct deliveries happened for surviving frontdesk and orchestrator
-      assert.equal(directDeliveries.length, 2);
+      // Direct deliveries happened for surviving frontdesk and orchestrator (halt announcements + teardown notices)
+      const teardownDeliveries = directDeliveries.filter((d) => d.msg.includes("[Fleet Teardown]"));
+      assert.equal(teardownDeliveries.length, 2);
       // Queues must be empty so resume does not deliver duplicate notices
       assert.equal(router.getQueue("frontdesk").length, 0, "frontdesk queue must not contain duplicate notice");
       assert.equal(router.getQueue("repo-surviving").length, 0, "orchestrator queue must not contain duplicate notice");
