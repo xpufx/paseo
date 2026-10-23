@@ -462,7 +462,11 @@ function SlashConsoleInner() {
           icon="Wrench"
         >
           {settings.hasPromptManager ? (
-            <HostFormRow label="Include Prompt Manager prompts in slash commands">
+            <HostFormRow
+              layout="inline"
+              label="Paseo Prompts Manager (yannelli/prompt-manager)"
+              description="Include prompts in slash commands"
+            >
               <HostToggle
                 value={settings.includePromptManagerPrompts ?? false}
                 onValueChange={(val) => updateSettings({ includePromptManagerPrompts: val })}
