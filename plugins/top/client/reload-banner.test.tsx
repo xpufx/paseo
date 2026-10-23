@@ -2,7 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
 import TestRenderer, { act } from "react-test-renderer";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { bumpPluginLoadCount, initClientHelpers } from "paseo-plugin-helper/core";
+import {
+  bumpPluginLoadCount,
+  getPendingReloadPlugins,
+  initClientHelpers,
+  notifyPluginReload,
+} from "paseo-plugin-helper/core";
 import { PluginReloadBanner } from "paseo-plugin-helper/ui";
 import { TopDashboardSurface } from "./surface";
 import { Pressable, Text } from "react-native";
@@ -159,5 +164,17 @@ describe("TopDashboardSurface reload banner (#1343)", () => {
 
     const texts = getAllText(renderer);
     expect(texts.some((t) => typeof t === "string" && t.includes("Plugin was reloaded"))).toBe(false);
+  });
+
+  it("notifyPluginReload queues global reload toast on daemon re-evaluation", () => {
+    const toastShow = vi.fn();
+    (globalThis as any).__PASEO_HOST__ = { toast: { show: toastShow } };
+
+    // Initial evaluation
+    expect(notifyPluginReload("top")).toBe(false);
+
+    // Re-evaluation (reload)
+    expect(notifyPluginReload("top")).toBe(true);
+    expect(getPendingReloadPlugins()).toContain("top");
   });
 });

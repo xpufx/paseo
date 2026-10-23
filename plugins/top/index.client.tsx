@@ -9,7 +9,11 @@ import {
   TextInput as HostTextInput,
   copyText,
 } from "@getpaseo/plugin/client/react-native";
-import { bumpPluginLoadCount, initClientHelpers } from "paseo-plugin-helper/core";
+import {
+  bumpPluginLoadCount,
+  initClientHelpers,
+  notifyPluginReload,
+} from "paseo-plugin-helper/core";
 import { composeFeatureModules } from "paseo-plugin-helper/shared";
 import { contributeClient as contributePillsClient } from "./client/pill";
 import { TopTimelineTelemetryCard } from "./client/telemetry";
@@ -20,7 +24,7 @@ import {
   topTimelineTelemetrySchema,
 } from "./shared/resources";
 
-bumpPluginLoadCount("top");
+notifyPluginReload("top");
 
 initClientHelpers({
   Icon,

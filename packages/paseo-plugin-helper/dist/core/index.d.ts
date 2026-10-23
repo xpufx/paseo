@@ -417,4 +417,89 @@ interface PluginReloadNoticeState {
  */
 declare function usePluginReloadNotice(pluginId: string): PluginReloadNoticeState;
 
-export { type PluginReloadNoticeState, PluginRpcContract, REFRESH_INTERVALS, type RefreshRate, RpcInput, type RpcMutationOptions, RpcOutput, type RpcQueryOptions, SettingsContract, SuiteSettings, type UseAutoRefreshQueryOptions, type UsePluginSettingsOptions, type UsePluginSettingsResult, type UseSharedPluginSettingsOptions, bumpPluginLoadCount, getPluginLoadCount, isPluginReloaded, normalizeSnapshotScope, shallowEqualRecord, sharedSnapshotKey, shouldEmitSnapshotUpdate, useAutoRefreshQuery, usePluginReloadNotice, usePluginSettings, useRpcMutation, useRpcQuery, useSharedPluginSettings, useSuiteSettings };
+/**
+ * Paseo Plugin Helper — Global Reload Bus (`paseo-plugin-helper/core`).
+ *
+ * Centralizes plugin and daemon reload notifications into a debounced,
+ * coalesced global toast dispatcher. Prevents notification storms when
+ * multiple plugins or daemon rebuilds reload concurrently.
+ *
+ * Contract — headless & client-safe:
+ * - No `node:*` imports.
+ * - No React Native or DOM scraping.
+ * - Toast delivery delegates to host toast provider via `getOptionalClientHost()?.useToast()`
+ *   or `globalThis.__PASEO_HOST__?.toast`.
+ */
+declare const DEFAULT_RELOAD_DEBOUNCE_MS = 500;
+declare const DEFAULT_RELOAD_QUENCH_MS = 5000;
+interface ReloadToastAction {
+    label: string;
+    onClick: () => void;
+}
+interface ReloadToastOptions {
+    duration?: number;
+    action?: ReloadToastAction;
+    [key: string]: unknown;
+}
+interface NotifyPluginReloadOptions {
+    /**
+     * If true, unconditionally enqueues the reload notification even on the
+     * initial bundle evaluation (load count <= 1). Useful for manual testing or
+     * explicit reload triggers.
+     */
+    force?: boolean;
+    /** Custom debounce window in milliseconds (default: 500ms). */
+    debounceMs?: number;
+    /** Custom quench cooldown window in milliseconds (default: 5000ms). */
+    quenchMs?: number;
+}
+interface ReloadBusState {
+    pendingPlugins: Set<string>;
+    debounceTimer: ReturnType<typeof setTimeout> | null;
+    lastToastTime: number;
+}
+declare global {
+    var __PASEO_RELOAD_BUS__: ReloadBusState | undefined;
+}
+/**
+ * Deliver a reload toast notification to the host client.
+ * Tries `globalThis.__PASEO_HOST__?.toast`, then `getOptionalClientHost()?.useToast()`,
+ * falling back to `console.info` if no host toast is available.
+ */
+declare function deliverReloadToast(message: string, customOptions?: ReloadToastOptions): boolean;
+/**
+ * Format a human-readable reload toast message for a list of reloaded plugin IDs.
+ */
+declare function formatReloadMessage(plugins: string[]): string;
+/**
+ * Immediately flush any pending reload notifications, delivering the coalesced toast.
+ */
+declare function flushReloadBusNow(options?: {
+    quenchMs?: number;
+}): boolean;
+/**
+ * Directly enqueue a plugin ID into the reload debounce queue.
+ */
+declare function enqueuePluginReload(pluginId: string, options?: NotifyPluginReloadOptions): void;
+/**
+ * Notify that a plugin was evaluated.
+ *
+ * Increments the plugin load counter. If the plugin has been reloaded (load count > 1)
+ * or if `options.force` is true, queues a debounced, storm-coalesced toast notification.
+ */
+declare function notifyPluginReload(pluginId: string, options?: NotifyPluginReloadOptions): boolean;
+/**
+ * Reset the global reload bus state (clears pending queue, timer, and quench timestamp).
+ * Useful for test isolation and teardown.
+ */
+declare function resetReloadBus(): void;
+/**
+ * Return a copy of currently pending plugin IDs awaiting debounce flush.
+ */
+declare function getPendingReloadPlugins(): string[];
+/**
+ * Return the timestamp of the last delivered reload toast.
+ */
+declare function getLastReloadToastTime(): number;
+
+export { DEFAULT_RELOAD_DEBOUNCE_MS, DEFAULT_RELOAD_QUENCH_MS, type NotifyPluginReloadOptions, type PluginReloadNoticeState, PluginRpcContract, REFRESH_INTERVALS, type RefreshRate, type ReloadBusState, type ReloadToastAction, type ReloadToastOptions, RpcInput, type RpcMutationOptions, RpcOutput, type RpcQueryOptions, SettingsContract, SuiteSettings, type UseAutoRefreshQueryOptions, type UsePluginSettingsOptions, type UsePluginSettingsResult, type UseSharedPluginSettingsOptions, bumpPluginLoadCount, deliverReloadToast, enqueuePluginReload, flushReloadBusNow, formatReloadMessage, getLastReloadToastTime, getPendingReloadPlugins, getPluginLoadCount, isPluginReloaded, normalizeSnapshotScope, notifyPluginReload, resetReloadBus, shallowEqualRecord, sharedSnapshotKey, shouldEmitSnapshotUpdate, useAutoRefreshQuery, usePluginReloadNotice, usePluginSettings, useRpcMutation, useRpcQuery, useSharedPluginSettings, useSuiteSettings };

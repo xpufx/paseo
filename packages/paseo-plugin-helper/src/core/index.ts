@@ -74,3 +74,19 @@ export {
   usePluginReloadNotice,
   type PluginReloadNoticeState,
 } from "./plugin-load-count.js";
+export {
+  notifyPluginReload,
+  enqueuePluginReload,
+  flushReloadBusNow,
+  resetReloadBus,
+  formatReloadMessage,
+  deliverReloadToast,
+  getPendingReloadPlugins,
+  getLastReloadToastTime,
+  DEFAULT_RELOAD_DEBOUNCE_MS,
+  DEFAULT_RELOAD_QUENCH_MS,
+  type NotifyPluginReloadOptions,
+  type ReloadToastAction,
+  type ReloadToastOptions,
+  type ReloadBusState,
+} from "./reload-bus.js";
