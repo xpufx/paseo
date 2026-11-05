@@ -1,5 +1,12 @@
 {
   "id": "slash",
+  "name": "Slash",
+  "description": "Custom slash commands for the composer with prompt interpolation, surface navigation, and backend operations",
+  "icon": "docs/screenshots/slash-logo-for-dark-bg.png",
+  "media": [
+    "docs/screenshots/slash-console.jpg",
+    "docs/screenshots/slash-autocomplete.jpg"
+  ],
   "requirements": {
     "paseo": ">=0.8.0"
   }

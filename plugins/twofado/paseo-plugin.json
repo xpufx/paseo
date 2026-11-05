@@ -1,5 +1,11 @@
 {
   "id": "twofado",
+  "name": "2fado",
+  "description": "Approval-gate UI and notifications for the 2fado privileged-command daemon",
+  "media": [
+    "screenshots/2fado-main-desktop.png",
+    "screenshots/2fado-telegram-approval.jpg"
+  ],
   "requirements": {
     "paseo": ">=0.8.0"
   },

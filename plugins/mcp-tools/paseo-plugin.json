@@ -1,5 +1,14 @@
 {
   "id": "mcp-tools",
+  "name": "MCP Tools",
+  "description": "Inspect session MCP servers and execute tools interactively with auto-generated input forms",
+  "media": [
+    "screenshots/mcp-servers.png",
+    "screenshots/mcp-server-details.png",
+    "screenshots/mcp-execute.png",
+    "screenshots/mcp-diagnostic.png",
+    "screenshots/mcp-settings.png"
+  ],
   "requirements": {
     "paseo": ">=0.8.0"
   }

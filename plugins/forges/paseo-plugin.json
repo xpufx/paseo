@@ -1,5 +1,12 @@
 {
   "id": "forges",
+  "name": "Forges",
+  "description": "Forgejo and Gitea issue tracking, label management, and agent envelope comments within Paseo",
+  "media": [
+    "screenshots/forge-main.png",
+    "screenshots/forge-list.png",
+    "screenshots/forge-issue-detail.png"
+  ],
   "requirements": {
     "paseo": ">=0.8.0"
   }

@@ -1,5 +1,18 @@
 {
   "id": "uppidi-fleet",
+  "name": "Uppidi Fleet",
+  "description": "Full-lifecycle autonomous engineering fleet management driven by Forgejo issue boards",
+  "media": [
+    "screenshots/fleet-main.png",
+    "screenshots/fleet-kanban.png",
+    "screenshots/fleet-forge-issues.png",
+    "screenshots/fleet-frontdesk-chat.png",
+    "screenshots/fleet-work-queue.png",
+    "screenshots/fleet-tooling.png",
+    "screenshots/fleet-settings.png",
+    "screenshots/forgejo-orchestration-light.png",
+    "screenshots/uppidi-fleet-nextgen.jpg"
+  ],
   "requirements": {
     "paseo": ">=0.8.0"
   },

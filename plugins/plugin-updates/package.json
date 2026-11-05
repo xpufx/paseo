@@ -27,7 +27,9 @@
   "files": [
     "paseo-plugin.json",
     "README.md",
+    "OVERVIEW.md",
     "LICENSE",
+    "screenshots",
     "index.client.tsx",
     "index.server.ts",
     "client",

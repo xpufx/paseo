@@ -1,5 +1,15 @@
 {
   "id": "top",
+  "name": "Top",
+  "description": "Live host and session monitor across composer pills, timeline turns, and an interactive dashboard",
+  "media": [
+    "screenshots/paseo-top-general-view.jpg",
+    "screenshots/paseo-top-dashboard.jpg",
+    "screenshots/1-paseo-top-modal-system.jpg",
+    "screenshots/2-paseo-top-modal-workspace.jpg",
+    "screenshots/3-paseo-top-modal-settings.jpg",
+    "screenshots/4-paseo-top-modal-about.jpg"
+  ],
   "requirements": {
     "paseo": ">=0.9.0"
   }

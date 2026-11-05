@@ -34,7 +34,9 @@
   "files": [
     "paseo-plugin.json",
     "README.md",
+    "OVERVIEW.md",
     "LICENSE",
+    "icon.png",
     "icon.svg",
     "index.server.ts",
     "server",
