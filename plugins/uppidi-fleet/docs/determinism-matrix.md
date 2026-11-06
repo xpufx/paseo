@@ -29,13 +29,13 @@ the easy mistake.
 
 | Label | Parts |
 | --- | ---: |
-| `deterministic` | 114 |
+| `deterministic` | 116 |
 | `hybrid` | 3 |
 | `ai-llm` | 0 |
 | `contested` | 1 |
-| **total** | **118** |
+| **total** | **120** |
 
-Inventory: 110 tracked source files in scope — 62 described above as source (54 files, some carrying several parts) and 56 test suites, which are described by the inventory itself rather than by hand.
+Inventory: 112 tracked source files in scope — 63 described above as source (55 files, some carrying several parts) and 57 test suites, which are described by the inventory itself rather than by hand.
 
 **The `ai-llm` column is empty, and that is the finding rather than a gap.** Nothing in this
 plugin performs model inference: there is no completions call, no provider SDK, no temperature
@@ -136,10 +136,11 @@ See *What this table does not cover* below for the sessions themselves.
 | Barrel re-export for surface, tree-view, panel and tooling | `client/index.ts` | 0 | 6 | `deterministic` | whole file | client/index.ts:1-4 — four `export *` statements, no code |
 | Fleet tooling surface: schema-driven manual runner and result viewer | `client/tooling.tsx` | 2 | 398 | `deterministic` | `UppidiFleetToolingView` | tooling.tsx:40-75 — retrieves tool definitions and manages dynamic schema form state<br>tooling.tsx:77-135 — validates required parameters and dispatches RPC tool execution<br>tooling.tsx:185-330 — renders schema-driven form fields with typed controls |
 | Workspace panel and sidebar wrappers, panel registration | `client/panel.tsx` | 6 | 49 | `deterministic` | `UppidiFleetPanel`, `UppidiFleetSidebar`, `registerWorkspacePanel` | panel.tsx:11-19 — the panel mounts the host theme and the required scroll owner<br>panel.tsx:27-33 — the sidebar wrapper mounts the host theme for the sidebar registration<br>panel.tsx:40-49 — registration wraps `client.addWorkspacePanel` |
-| Fleet surface: tabs, router status badge, attention card, role-model and metrics dashboards | `client/surface.tsx` | 21 | 3744 | `deterministic` | `UppidiFleetSurface`, `UppidiBrandMark`, `UppidiTopHeaderBar`, `AttentionAgentCard`, `resolveRouterStatusBadge` | surface.tsx:295-306 — router badge is a three-way branch on two booleans<br>surface.tsx:499 — the surface reads every dataset over `useRpc`<br>surface.tsx:1281-1300 — model selection is a `Select` writing the role-model RPC<br>surface.tsx:682-685 — the write reports the server's own message, not a local guess |
+| Fleet surface: tabs, router status badge, attention card, role-model and metrics dashboards | `client/surface.tsx` | 21 | 3768 | `deterministic` | `UppidiFleetSurface`, `UppidiBrandMark`, `UppidiTopHeaderBar`, `AttentionAgentCard`, `resolveRouterStatusBadge` | surface.tsx:295-306 — router badge is a three-way branch on two booleans<br>surface.tsx:499 — the surface reads every dataset over `useRpc`<br>surface.tsx:1281-1300 — model selection is a `Select` writing the role-model RPC<br>surface.tsx:682-685 — the write reports the server's own message, not a local guess |
+| Executive KPI stat strip: metric calculations, filter toggles, live tiles | `client/components/kpi-stat-strip.tsx` | 12 | 543 | `deterministic` | `TERMINAL_STATUSES`, `isTerminalAgentStatus`, `isSameLocalDay`, `isCompletedRecently`, `calculateKpiStats`, `matchesKpiFilter`, +2 more | kpi-stat-strip.tsx:34-37 — isTerminalAgentStatus is a pure set lookup on status string<br>kpi-stat-strip.tsx:42-55 — isSameLocalDay computes calendar match via local Date fields<br>kpi-stat-strip.tsx:102-178 — calculateKpiStats computes active, blocked, completed, and queue counts purely from agent rosters<br>kpi-stat-strip.tsx:183-235 — matchesKpiFilter is a deterministic predicate mapping filters to agent states<br>kpi-stat-strip.tsx:253-381 — KpiStatTile renders theme status colors and badge values without model intervention<br>kpi-stat-strip.tsx:405-470 — KpiStatStrip lays out the 4 executive metric tiles with click-to-filter toggles |
 | Forge issues surface: query, filtering, issue rows, status badges | `client/forges-tab.tsx` | 13 | 546 | `deterministic` | `forgeOpenIssuesContract`, `forgeContextContract`, `ForgeIssuesView`, `ForgesTabView` | forges-tab.tsx:21-70 — declares RPC query contracts for forge open issues and context<br>forges-tab.tsx:96-100 — reads issues over useRpcQuery<br>forges-tab.tsx:110-125 — filters issues by client query without model interaction |
 | Fleet Kanban board: column mapping, transitions, ticket cards | `client/kanban-board.tsx` | 14 | 74 | `deterministic` | `KANBAN_COLUMNS`, `getIssueKanbanColumn`, `getColumnTransitions`, `KanbanCard`, `UppidiFleetKanbanBoard` | kanban-board.tsx:21-32 — re-exports canonical column definitions, transitions, and cards from @xpufx/paseo-plugin-ui and backend-tickets<br>kanban-board.tsx:44-56 — UppidiFleetKanbanBoard delegates to shared presentation component; no model call |
-| Agent tree rendering: status lights, health gauges, metrics cards, rows, project groups | `client/tree-view.tsx` | 38 | 3510 | `deterministic` | `UppidiFleetTreeView`, `AgentStatusLight`, `AgentStateDot`, `AgentHealthGauge`, `AgentMetricsCard`, `OrchestratorRow`, +3 more | tree-view.tsx:387-403 — relative time is arithmetic on a timestamp<br>tree-view.tsx:450 — health gauge reads thresholds computed server-side<br>tree-view.tsx:2042 — the tree view is a pure function of the agents array |
+| Agent tree rendering: status lights, health gauges, metrics cards, rows, project groups | `client/tree-view.tsx` | 38 | 3528 | `deterministic` | `UppidiFleetTreeView`, `AgentStatusLight`, `AgentStateDot`, `AgentHealthGauge`, `AgentMetricsCard`, `OrchestratorRow`, +3 more | tree-view.tsx:387-403 — relative time is arithmetic on a timestamp<br>tree-view.tsx:450 — health gauge reads thresholds computed server-side<br>tree-view.tsx:2042 — the tree view is a pure function of the agents array |
 | Shared metrics bar: chip anatomy, selection, zero-count hiding, theme-driven colors | `client/metrics-bar.tsx` | 3 | 108 | `deterministic` | `MetricsBar`, `MetricsBarChip`, `MetricsBarProps` | metrics-bar.tsx:55-66 — container fill, border, radius and padding from theme colors<br>metrics-bar.tsx:69-74 — zero-count hide, selection and tone derivation are boolean arithmetic<br>metrics-bar.tsx:92-98 — icon/label/count render from props, no model call |
 | Fleet theme accessor: host theme colors and helpers plus plugin typography scale | `client/theme.ts` | 6 | 80 | `deterministic` | `FleetTheme`, `useFleetTheme` | theme.ts:50-60 — colors, alpha and status helpers come from the host theme; typography is a fixed local scale<br>theme.ts:7-13 — no computed-style scraping, no client provider |
 | Plugin-local presentation kit: layout, cards, badges, buttons, inputs, table, ticket lifecycle | `client/host-ui.tsx` | 127 | 781 | `deterministic` | `Card`, `Button`, `Badge`, `DataTable`, `ModalBody`, `ForgeIcon`, +2 more | host-ui.tsx:1-20 — component library over the host theme, host Icon and plain react-native; no model call<br>host-ui.tsx:100-200 — Row/Stack/Grid and Card/Tabs compose host theme colors only<br>host-ui.tsx:603-760 — ticket lifecycle view renders RPC payloads; it does not produce model output |
@@ -152,6 +153,7 @@ See *What this table does not cover* below for the sessions themselves.
 - **Fleet tooling surface: schema-driven manual runner and result viewer** (`client/tooling.tsx`) — Manual schema-driven tool runner surface. Queries tool schemas and displays execution output.
 - **Workspace panel and sidebar wrappers, panel registration** (`client/panel.tsx`) — Chrome around the surface. No model.
 - **Fleet surface: tabs, router status badge, attention card, role-model and metrics dashboards** (`client/surface.tsx`) — Renders server state and writes back through the deterministic role-model and settings RPCs. The model picker configures another row's spawn; it does not run a model, so it stays deterministic here.
+- **Executive KPI stat strip: metric calculations, filter toggles, live tiles** (`client/components/kpi-stat-strip.tsx`) — Pure presentation component and deterministic stat calculation helpers. No model interaction.
 - **Forge issues surface: query, filtering, issue rows, status badges** (`client/forges-tab.tsx`) — Renders forge issues for the workspace and filters them deterministically.
 - **Fleet Kanban board: column mapping, transitions, ticket cards** (`client/kanban-board.tsx`) — Interactive Kanban board mapping issues across lifecycle states.
 - **Agent tree rendering: status lights, health gauges, metrics cards, rows, project groups** (`client/tree-view.tsx`) — The largest file in the client half and still fully deterministic: it displays whatever the server classified. Displaying an LLM's state is not being one.
@@ -217,6 +219,7 @@ that enforces the invariant; this table is the readable view of the same fact.
 | `client/frontdesk-follow-scroll.test.tsx` | client/frontdesk-follow-scroll | `test:tsx` | 316 | `deterministic` |
 | `client/issue-metrics-bar.test.ts` | Issue metrics bar rendering | `test:node` | 64 | `deterministic` |
 | `client/kanban-board.test.tsx` | client/kanban-board | `test:tsx` | 842 | `deterministic` |
+| `client/kpi-stat-strip.test.tsx` | client/kpi-stat-strip | `test:tsx` | 310 | `deterministic` |
 | `client/metrics-bar-parity.test.ts` | Parity between the metrics bar and its shared source | `test:node` | 95 | `deterministic` |
 | `client/mobile-layout.test.ts` | Mobile layout behaviour under the measurement double | `test:tsx` | 371 | `deterministic` |
 | `client/pill-policy.test.ts` | client/pill-policy | `test:tsx` | 333 | `deterministic` |
@@ -293,6 +296,7 @@ matrix above is the judgement half.
 | `bin/fleet-mcp-server.mjs` | script | 120 | 0 | — |
 | `client/actions-tab.test.tsx` | client | 187 | 0 | — |
 | `client/actions-tab.tsx` | client | 449 | 1 | `ActionsTabView` |
+| `client/components/kpi-stat-strip.tsx` | client | 543 | 12 | `CalculateKpiStatsOptions`, `KpiStatStrip`, `KpiStatStripProps`, `KpiStatTile`, `KpiStatTileProps`, `KpiStats`, `TERMINAL_STATUSES`, `calculateKpiStats`, `isCompletedRecently`, `isSameLocalDay`, `isTerminalAgentStatus`, `matchesKpiFilter` |
 | `client/cross-repo-issues.test.ts` | client | 277 | 0 | — |
 | `client/entry.test.ts` | client | 1452 | 0 | — |
 | `client/fleet-state-filter-row.test.ts` | client | 49 | 0 | — |
@@ -304,6 +308,7 @@ matrix above is the judgement half.
 | `client/issue-metrics-bar.test.ts` | client | 64 | 0 | — |
 | `client/kanban-board.test.tsx` | client | 842 | 0 | — |
 | `client/kanban-board.tsx` | client | 74 | 14 | `AutomationTier`, `KANBAN_COLUMNS`, `KanbanCard`, `KanbanCardProps`, `KanbanColumnDef`, `KanbanColumnId`, `KanbanTransitionAction`, `RepoGroup`, `UppidiFleetKanbanBoard`, `UppidiFleetKanbanBoardProps`, `getActiveDraggingIssue`, `getColumnTransitions` …+2 more |
+| `client/kpi-stat-strip.test.tsx` | client | 310 | 0 | — |
 | `client/metrics-bar-parity.test.ts` | client | 95 | 0 | — |
 | `client/metrics-bar.tsx` | client | 108 | 3 | `MetricsBar`, `MetricsBarChip`, `MetricsBarProps` |
 | `client/mobile-layout.test.ts` | client | 371 | 0 | — |
@@ -315,12 +320,12 @@ matrix above is the judgement half.
 | `client/search-height.test.ts` | client | 166 | 0 | — |
 | `client/select-stable-rows.test.tsx` | client | 176 | 0 | — |
 | `client/surface-halt.test.tsx` | client | 270 | 0 | — |
-| `client/surface.tsx` | client | 3744 | 21 | `AttentionAgentCard`, `AttentionAgentCardProps`, `ModeBanner`, `ModeBannerProps`, `ModeTransitionModal`, `ModeTransitionModalProps`, `ModelAlertBanner`, `ModelAlertBannerProps`, `ResetStateModal`, `ResetStateModalProps`, `RouterStatusBadge`, `SurfaceTab` …+9 more |
+| `client/surface.tsx` | client | 3768 | 21 | `AttentionAgentCard`, `AttentionAgentCardProps`, `ModeBanner`, `ModeBannerProps`, `ModeTransitionModal`, `ModeTransitionModalProps`, `ModelAlertBanner`, `ModelAlertBannerProps`, `ResetStateModal`, `ResetStateModalProps`, `RouterStatusBadge`, `SurfaceTab` …+9 more |
 | `client/testing/fleet-fixtures.ts` | client | 422 | 9 | `WIDE_WORKTREE`, `agentsPayload`, `agentsPayloadNoFrontDesk`, `hookQueuesPayload`, `installPayloads`, `issuesPayload`, `metricsPayload`, `runnersPayload`, `skillsPayload` |
 | `client/testing/fleet-harness.ts` | client | 280 | 36 | `ActivityIndicator`, `Animated`, `Appearance`, `Dimensions`, `Easing`, `FlatList`, `FleetRenderHarness`, `Icon`, `Image`, `Linking`, `Modal`, `PanResponder` …+24 more |
 | `client/theme.ts` | client | 80 | 6 | `FleetTheme`, `FleetTypographyScale`, `FleetTypographyToken`, `HostThemeProvider`, `HostThemeProviderProps`, `useFleetTheme` |
 | `client/tooling.tsx` | client | 398 | 2 | `UppidiFleetToolingProps`, `UppidiFleetToolingView` |
-| `client/tree-view.tsx` | client | 3510 | 38 | `AgentAttentionBanner`, `AgentAttentionBannerProps`, `AgentHealthGauge`, `AgentHealthGaugeProps`, `AgentInventoryDrawer`, `AgentLabelsRow`, `AgentMetricsCard`, `AgentMetricsCardProps`, `AgentStateDot`, `AgentStatusLight`, `AgentStatusLightProps`, `AgentStatusLightsRow` …+26 more |
+| `client/tree-view.tsx` | client | 3528 | 38 | `AgentAttentionBanner`, `AgentAttentionBannerProps`, `AgentHealthGauge`, `AgentHealthGaugeProps`, `AgentInventoryDrawer`, `AgentLabelsRow`, `AgentMetricsCard`, `AgentMetricsCardProps`, `AgentStateDot`, `AgentStatusLight`, `AgentStatusLightProps`, `AgentStatusLightsRow` …+26 more |
 | `client/tree-zebra.test.tsx` | client | 47 | 0 | — |
 | `client/ui-guard.test.ts` | client | 68 | 0 | — |
 | `index.client.tsx` | entry | 83 | 7 | `UppidiFleetPanel`, `UppidiFleetSidebar`, `UppidiFleetSurface`, `UppidiForgePanel`, `UppidiForgeSurface`, `contribute`, `registerWorkspacePanel` |

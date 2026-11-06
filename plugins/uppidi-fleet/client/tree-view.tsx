@@ -21,6 +21,7 @@ import { copyToClipboard, HOST_SHADOW_COLOR } from "paseo-plugin-helper/lifecycl
 import { useRpcMutation, useRpcQuery } from "paseo-plugin-helper/core";
 import { useFleetTheme } from "./theme.js";
 import { MetricsBar } from "./metrics-bar.js";
+import { matchesKpiFilter } from "./components/kpi-stat-strip.js";
 import { useToast } from "@getpaseo/plugin/client/react-native";
 import type { PluginSurfaceProps } from "@getpaseo/plugin/client";
 import {
@@ -108,6 +109,9 @@ export interface UppidiFleetTreeViewProps {
   /** Presentation sort direction for project / repository groups (#796). */
   repoSortDirection?: SortDirection;
   onRepoSortDirectionChange?: (dir: SortDirection) => void;
+  /** Active KPI filter from executive strip (#1086). */
+  kpiFilter?: string;
+  onKpiFilterChange?: (filter: string) => void;
 }
 
 export interface AgentStatusLightProps {
@@ -2729,6 +2733,8 @@ export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
   onRepoSortFieldChange,
   repoSortDirection: propsRepoSortDirection,
   onRepoSortDirectionChange,
+  kpiFilter = "all",
+  onKpiFilterChange,
 }) => {
   const { colors, typography } = useFleetTheme();
   const toast = useToast();
@@ -3012,6 +3018,9 @@ export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
           return false;
         }
       }
+      if (kpiFilter && kpiFilter !== "all") {
+        if (!matchesKpiFilter(agent, kpiFilter)) return false;
+      }
       if (!query.trim()) return true;
       const q = query.toLowerCase();
       const worktree = agent.worktree || extractAgentWorktree(agent) || "";
@@ -3031,7 +3040,7 @@ export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
     };
 
     return filterAgentTree(baseTree, matches);
-  }, [baseTree, query, stateFilter]);
+  }, [baseTree, query, stateFilter, kpiFilter]);
 
   // 4. Group by Front Desk and Projects (#403, #426, #470, #796)
   const { frontDeskNodes, staleFrontDeskNodes: filteredStaleFrontDeskNodes, enrolledGroups, detachedGroups } = useMemo(() => {
@@ -3068,24 +3077,30 @@ export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
     if (selectedRepo && selectedRepo !== "all") {
       list = list.filter((g) => isRepoMatching(g.projectName, selectedRepo) || g.projectName.toLowerCase() === selectedRepo.toLowerCase());
     }
-    if (!query.trim() && stateFilter === "all") {
+    if (kpiFilter === "queue") {
+      list = list.filter((g) => (g.queuedHooksCount ?? 0) > 0);
+    }
+    if (!query.trim() && stateFilter === "all" && (!kpiFilter || kpiFilter === "all")) {
       return list;
     }
     return list.filter(
       (g) => g.allAgents.length > 0 || g.projectName.toLowerCase().includes(query.toLowerCase())
     );
-  }, [query, stateFilter, enrolledGroups, selectedRepo]);
+  }, [query, stateFilter, kpiFilter, enrolledGroups, selectedRepo]);
 
   const displayDetached = useMemo(() => {
     let list = detachedGroups;
     if (selectedRepo && selectedRepo !== "all") {
       list = list.filter((g) => isRepoMatching(g.projectName, selectedRepo) || g.projectName.toLowerCase() === selectedRepo.toLowerCase());
     }
-    if (!query.trim() && stateFilter === "all") {
+    if (kpiFilter === "queue") {
+      list = list.filter((g) => (g.queuedHooksCount ?? 0) > 0);
+    }
+    if (!query.trim() && stateFilter === "all" && (!kpiFilter || kpiFilter === "all")) {
       return list;
     }
     return list.filter((g) => g.allAgents.length > 0);
-  }, [query, stateFilter, detachedGroups, selectedRepo]);
+  }, [query, stateFilter, kpiFilter, detachedGroups, selectedRepo]);
 
   const totalCount = agentsData?.totalCount ?? allAgents.length;
   const runningCount = agentsData?.runningCount ?? 0;
@@ -3094,7 +3109,9 @@ export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
 
   // When a filter is active, honor it; otherwise always show the singleton primary.
   const displayFrontDeskNode =
-    query.trim() || stateFilter !== "all" ? frontDeskNodes[0] ?? null : primaryFrontDeskNode;
+    query.trim() || stateFilter !== "all" || (kpiFilter && kpiFilter !== "all")
+      ? frontDeskNodes[0] ?? null
+      : primaryFrontDeskNode;
 
   // 5. Fleet Orchestrators for Front Desk Hero (#410)
   const allOrchestrators = useMemo(() => {
@@ -3119,7 +3136,7 @@ export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
         return isRepoMatching(proj, selectedRepo) || proj.toLowerCase() === selectedRepo.toLowerCase();
       });
     }
-    if (!query.trim() && stateFilter === "all") {
+    if (!query.trim() && stateFilter === "all" && (!kpiFilter || kpiFilter === "all")) {
       return base;
     }
     const list: UppidiAgent[] = [];
@@ -3140,7 +3157,7 @@ export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
     }
     collect(filteredTree);
     return list;
-  }, [query, stateFilter, filteredTree, allOrchestrators, selectedRepo]);
+  }, [query, stateFilter, kpiFilter, filteredTree, allOrchestrators, selectedRepo]);
 
   // Toggle handlers for collapse
   const handleToggleProject = (projectName: string) => {
@@ -3357,12 +3374,13 @@ export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
                 : "No active agents found in the fleet."
             }
             icon="Network"
-            actionLabel={query.trim() || stateFilter !== "all" ? "Clear Filters" : undefined}
+            actionLabel={query.trim() || stateFilter !== "all" || (kpiFilter && kpiFilter !== "all") ? "Clear Filters" : undefined}
             onAction={
-              query.trim() || stateFilter !== "all"
+              query.trim() || stateFilter !== "all" || (kpiFilter && kpiFilter !== "all")
                 ? () => {
                     setQuery("");
                     setStateFilter("all");
+                    onKpiFilterChange?.("all");
                   }
                 : undefined
             }

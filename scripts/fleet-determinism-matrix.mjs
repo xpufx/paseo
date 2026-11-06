@@ -886,6 +886,33 @@ const PARTS = [
     note: "Renders server state and writes back through the deterministic role-model and settings RPCs. The model picker configures another row's spawn; it does not run a model, so it stays deterministic here.",
   },
   {
+    file: `${PLUGIN}/client/components/kpi-stat-strip.tsx`,
+    part: "Executive KPI stat strip: metric calculations, filter toggles, live tiles",
+    layer: "client",
+    label: DETERMINISTIC,
+    anchors: {
+      exports: [
+        "TERMINAL_STATUSES",
+        "isTerminalAgentStatus",
+        "isSameLocalDay",
+        "isCompletedRecently",
+        "calculateKpiStats",
+        "matchesKpiFilter",
+        "KpiStatTile",
+        "KpiStatStrip",
+      ],
+    },
+    evidence: [
+      [`kpi-stat-strip.tsx:34-37`, "isTerminalAgentStatus is a pure set lookup on status string"],
+      [`kpi-stat-strip.tsx:42-55`, "isSameLocalDay computes calendar match via local Date fields"],
+      [`kpi-stat-strip.tsx:102-178`, "calculateKpiStats computes active, blocked, completed, and queue counts purely from agent rosters"],
+      [`kpi-stat-strip.tsx:183-235`, "matchesKpiFilter is a deterministic predicate mapping filters to agent states"],
+      [`kpi-stat-strip.tsx:253-381`, "KpiStatTile renders theme status colors and badge values without model intervention"],
+      [`kpi-stat-strip.tsx:405-470`, "KpiStatStrip lays out the 4 executive metric tiles with click-to-filter toggles"],
+    ],
+    note: "Pure presentation component and deterministic stat calculation helpers. No model interaction.",
+  },
+  {
     file: `${PLUGIN}/client/forges-tab.tsx`,
     part: "Forge issues surface: query, filtering, issue rows, status badges",
     layer: "client",

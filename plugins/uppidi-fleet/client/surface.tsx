@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import { Linking, Text, View } from "react-native";
 import type { PluginSurfaceProps } from "@getpaseo/plugin/client";
 import { Modal, useToast, Icon } from "@getpaseo/plugin/client/react-native";
@@ -132,6 +132,7 @@ import {
   formatProjectOptionLabel,
 } from "../shared/repo-identity.js";
 import { defaultAgentLink } from "../shared/agent-links.js";
+import { KpiStatStrip, calculateKpiStats } from "./components/kpi-stat-strip.js";
 
 export type SurfaceTab = "tree" | "dashboard" | "tooling" | "settings" | "board" | "forges" | "actions" | "runners";
 
@@ -1124,6 +1125,7 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
   const { settings, updateSettings, isUpdating: isUpdatingSettings } = usePluginSettings(uppidiFleetSettingsContract);
   const [activeTab, setActiveTab] = useState<SurfaceTab>("tree");
   const [selectedRepo, setSelectedRepo] = useState<string>("all");
+  const [kpiFilter, setKpiFilter] = useState<string>("all");
 
   // Section 1: Issues sort & filter state
   const [filter, setFilter] = useState<IssuePreset>("all");
@@ -1745,6 +1747,21 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
   const attentionAgents = useMemo(() => collectAttentionAgents(allAgents), [allAgents]);
   const permissionAgentCount = useMemo(() => countPermissionAgents(allAgents), [allAgents]);
 
+  const kpiStats = useMemo(() => {
+    return calculateKpiStats(allAgents, {
+      queueDepth: totalQueued,
+      repoQueuedHooks: agentsData?.repoQueuedHooks,
+      totalQueued: hookStatus?.totalQueued,
+    });
+  }, [allAgents, totalQueued, agentsData?.repoQueuedHooks, hookStatus?.totalQueued]);
+
+  const handleKpiFilterChange = useCallback((nextFilter: string) => {
+    setKpiFilter(nextFilter);
+    if (nextFilter !== "all" && activeTab !== "tree") {
+      setActiveTab("tree");
+    }
+  }, [activeTab]);
+
   const activeWorkspaceId = useMemo(() => {
     if ((props as any).workspaceId) return (props as any).workspaceId as string;
     if (selectedRepo !== "all") {
@@ -1960,6 +1977,11 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
             onReturnToRun={handleReturnToRun}
           />
           <ModelAlertBanner alerts={fleetAlertsData?.alerts ?? []} />
+          <KpiStatStrip
+            stats={kpiStats}
+            activeFilter={kpiFilter}
+            onFilterChange={handleKpiFilterChange}
+          />
           <Tabs tabs={tabs} activeTab={activeTab} onTabChange={(id) => setActiveTab(id as SurfaceTab)} />
         </Stack>
       }
@@ -3254,6 +3276,8 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
           isArchiving={isBulkArchiving}
           selectedRepo={selectedRepo}
           registeredFrontDeskAgentId={hookStatus?.frontDesk?.agentId ?? null}
+          kpiFilter={kpiFilter}
+          onKpiFilterChange={setKpiFilter}
         />
       ) : activeTab === "board" ? (
         <Card variant="elevated" style={{ width: "100%" }}>
