@@ -74,31 +74,18 @@ jobs:
   install-smoke:
     name: Install plugins with Paseo ${{ matrix.paseo-version }}
     runs-on: alpine-docker
-    # Keep the supported stable line visible without allowing it to block the
-    # current beta release gate. `fail-fast: false` ensures a 0.8 regression
-    # never prevents the gating beta lane from reporting its result.
     continue-on-error: ${{ matrix.allow-failure }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - paseo-version: 0.8.0
-            allow-failure: true
-          - paseo-version: 0.9.0
-            allow-failure: false
-          # 0.10 stable (0.10.0) is released on npm, but this lane stays
-          # experimental and must not block merges until the 0.10 runtime
-          # is verified as the gating lane. `continue-on-error: ${{ matrix.allow-failure }}`
-          # already scopes the non-blocking behaviour to this lane alone, so
-          # 0.9.0 stays the gating lane and 0.8.0 stays legacy.
-          #
-          # Pinned exactly, not a `0.10` range: the install step asserts
+          # Pinned exactly, not a range: the install step asserts
           # `paseo --version` equals `matrix.paseo-version`
           # (see "Install Paseo CLI"), so a floating range would make that
           # assertion pass a moving target. The exact pin also makes a lane
-          # failure reproducible instead of "it was green last week".
-          - paseo-version: 0.10.0
-            allow-failure: true
+          # failure reproducible.
+          - paseo-version: 0.15.2
+            allow-failure: false
     # Dedicated paseo-ci image with Node 22, git/make/jq, and pinned @getpaseo/cli.
     # A fresh container per run is the point: no reused node_modules and no pre-existing daemon state.
     container:
@@ -288,19 +275,10 @@ jobs:
           # a git repository"). Reclaim the port before starting.
           fuser -k 6767/tcp 2>/dev/null || true
           sleep 1
-          # Paseo 0.8 accepts launch-time daemon options and returns as soon as
-          # it has handed the daemon off. In 0.9 those options are persistent
-          # daemon configuration; `daemon start` then waits for readiness.
-          # Keep the legacy invocation isolated so its compatibility result
-          # remains informational, while the current lane uses the 0.9 API.
-          if [ "${{ matrix.paseo-version }}" = "0.8.0" ]; then
-            paseo daemon start --listen 127.0.0.1:6767 --no-relay --no-web-ui
-          else
-            paseo daemon config set daemon.listen 127.0.0.1:6767 --home "$PASEO_HOME"
-            paseo daemon config set daemon.relay.enabled false --home "$PASEO_HOME"
-            paseo daemon config set features.webUi.enabled false --home "$PASEO_HOME"
-            paseo daemon start --home "$PASEO_HOME"
-          fi
+          paseo daemon config set daemon.listen 127.0.0.1:6767 --home "$PASEO_HOME"
+          paseo daemon config set daemon.relay.enabled false --home "$PASEO_HOME"
+          paseo daemon config set features.webUi.enabled false --home "$PASEO_HOME"
+          paseo daemon start --home "$PASEO_HOME"
           for _ in $(seq 1 60); do
             if paseo status --json 2>/dev/null | jq -e '.localDaemon == "running" and .connectedDaemon == "reachable"' >/dev/null; then
               echo "daemon healthy"
@@ -318,33 +296,11 @@ jobs:
       # the manifest, and asserts that id reaches running. On the staged path the
       # source is a local `file://` clone of the prepared tree, so this red result
       # precedes any real mirror push.
-      #
-      # For Paseo 0.8.0 legacy lane: plugins that require Paseo 0.9 (like x-comms)
-      # are skipped from the install test, but announced in the log as a reminder.
       - name: Resolve effective plugins for matrix lane
         id: effective-plugins
         run: |
           set -euo pipefail
           PLUGINS="${{ steps.source.outputs.plugins }}"
-          if [ "${{ matrix.paseo-version }}" = "0.8.0" ]; then
-            # Skip plugins whose own manifest excludes 0.8, rather than
-            # hardcoding names. The manifest is the authority on what a plugin
-            # supports, so a plugin that bumps to >=0.9.0 drops out of this lane
-            # on its own instead of needing a second edit here — the same reason
-            # #646 stopped asserting a hardcoded plugin count.
-            LANE_VERSION="0.8.0"
-            KEPT=""
-            for p in $PLUGINS; do
-              req="$(node -e "console.log(require('./plugins/'+process.argv[1]+'/paseo-plugin.json').requirements?.paseo ?? '')" "$p" 2>/dev/null || echo "")"
-              min="$(printf '%s' "$req" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
-              if [ -n "$min" ] && [ "$min" != "$(printf '%s\n%s\n' "$min" "$LANE_VERSION" | sort -V | head -1)" ]; then
-                echo "::notice::Paseo ${LANE_VERSION} legacy lane: skipping ${p} (requires Paseo ${req})"
-                continue
-              fi
-              KEPT="${KEPT}${KEPT:+ }${p}"
-            done
-            PLUGINS="$KEPT"
-          fi
           echo "plugins=${PLUGINS}" >> "$GITHUB_OUTPUT"
       - name: Install each plugin from the staged tree and assert it is running
         uses: ./.forgejo/actions/install-plugin-smoke
@@ -353,20 +309,10 @@ jobs:
           mirror-ref: ${{ steps.source.outputs.ref }}
           plugins: ${{ steps.effective-plugins.outputs.plugins }}
 
-      # Legacy compatibility is informational: make a failed 0.8 observation
-      # conspicuous in the run while `continue-on-error` keeps the beta gate
-      # authoritative. The warning links the maintainer directly to its ticket.
-      - name: Report Paseo 0.8 compatibility failure
-        if: ${{ always() && matrix.allow-failure && failure() }}
-        run: |
-          echo "::warning title=Paseo 0.8.0 install smoke failed::The legacy compatibility lane failed. See https://forge.mrs.uppidi.com/xpufx-org/paseo/issues/296."
-
       # On-demand only: the gate verifies every push/PR, but the public mirror
       # moves only when dispatched with `mirror: true`, after the staged-tree
       # smoke above passed. A missing secret is a warning, not a failure.
       - name: Push staged tree to the public GitHub mirror (on demand)
-        # Publishing remains a single, current-version gate: the legacy 0.8
-        # compatibility observation must never publish a second mirror commit.
         if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.mirror == 'true' && matrix.allow-failure == false }}
         env:
           GITHUB_MIRROR_TOKEN: ${{ secrets.FJ_GITHUB_MIRROR_TOKEN }}
