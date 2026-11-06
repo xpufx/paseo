@@ -1,7 +1,7 @@
 // Single source of truth for how a plugin's vendored paseo-plugin-helper copies
 // are laid out on disk, and for translating between the two import forms:
 //
-//   dev (committed)          publish (staged mirror tree)
+//   dev (committed)          publish (staged npm package)
 //   paseo-plugin-helper/x    ./vendor/paseo-plugin-helper/index
 //
 // Dev source imports the bare specifier so the workspace
@@ -9,26 +9,9 @@
 // plugin's tsconfig paths) gives live helper edits with no copy step. Paseo's
 // compiler rejects a *relative* vendored import that realpaths outside the
 // plugin directory, but allows the bare specifier to resolve to a linked
-// dependency root. The published tree has no node_modules, so mirror-github.mjs
-// rewrites the bare specifiers to the committed vendored copies before staging.
+// dependency root.
 
 import path from "node:path";
-
-// Per-plugin helper src trees to vendor. "core", "ui" and "lifecycle" are
-// client-side exports and are colocated under <plugin>/client/vendor; "mcp" is
-// server-side (node-only) and lands in <plugin>/server/vendor/paseo-plugin-helper/mcp/.
-// The registration engines live in "lifecycle"; plugins that consume them
-// vendor "lifecycle". Plugins that render the ui/ adapter layer vendor "ui".
-export const PLUGINS = {
-  "top": ["lifecycle", "core", "ui", "server", "shared"],
-  "mcp-tools": ["lifecycle", "core", "ui", "server", "shared", "mcp"],
-  "forges": ["lifecycle", "core", "ui", "server", "shared"],
-  "slash": ["lifecycle", "core", "ui", "server", "shared"],
-  "x-comms": ["lifecycle", "core", "ui", "server", "shared", "mcp"],
-  "twofado": ["lifecycle", "core", "ui", "server", "shared"],
-  "plugin-updates": ["lifecycle", "core", "ui", "server", "shared"],
-  "wellbeing": ["lifecycle", "core", "ui", "server", "shared"],
-};
 
 export const TREES = ["lifecycle", "core", "ui", "server", "shared", "mcp"];
 export const DEST_ROOT = "vendor/paseo-plugin-helper";
