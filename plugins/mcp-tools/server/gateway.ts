@@ -1,4 +1,4 @@
-import { McpCompositeRouter, McpControlServer } from "@xpufx/mcp-gateway/server";
+import type { McpCompositeRouter, McpControlServer } from "@xpufx/mcp-gateway/server";
 import type { McpToolsSettings } from "../shared/mcp.js";
 import { log } from "./mcp.js";
 
@@ -41,6 +41,14 @@ export async function startGateway(
   }
 
   try {
+    const gatewayPkg = "@xpufx/mcp-gateway/server";
+    const { McpCompositeRouter, McpControlServer } = (await import(gatewayPkg)) as {
+      McpCompositeRouter: new () => McpCompositeRouter;
+      McpControlServer: new (
+        router: McpCompositeRouter,
+        options: { port: number; host: string; name: string }
+      ) => McpControlServer;
+    };
     const router = new McpCompositeRouter();
     const server = new McpControlServer(router, {
       port,

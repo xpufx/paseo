@@ -1,8 +1,29 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
-import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
-import type { Tool, CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+export interface Tool {
+  name: string;
+  description?: string;
+  inputSchema?: {
+    type?: string;
+    properties?: Record<string, any>;
+    required?: string[];
+    [key: string]: any;
+  };
+}
+
+export interface CallToolResult {
+  content: Array<{ type: string; text?: string; [key: string]: any }>;
+  isError?: boolean;
+  [key: string]: any;
+}
+
+export interface Transport {
+  start(): Promise<void>;
+  close(): Promise<void>;
+  send(message: any, options?: any): Promise<void>;
+  [key: string]: any;
+}
 import type {
   McpServerConfig,
   McpServerInfo,

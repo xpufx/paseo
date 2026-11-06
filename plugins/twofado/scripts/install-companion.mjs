@@ -13,12 +13,15 @@ import { existsSync, mkdirSync, chmodSync, readFileSync, rmSync } from "node:fs"
 import { spawnSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { resolvePaseoHome } from "paseo-plugin-helper/server";
-
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = resolve(__dirname, "..");
 
-export { resolvePaseoHome };
+export function resolvePaseoHome(env = process.env) {
+  const custom = env.PASEO_HOME?.trim();
+  if (custom) return custom;
+  const home = (env.REAL_HOME || env.HOME || env.USERPROFILE || "").trim();
+  return join(home, ".paseo");
+}
 
 export const SUPPORTED_TARGETS = {
   "linux-x64": { os: "linux", arch: "amd64" },

@@ -93,10 +93,10 @@ jobs:
     env:
       # Dedicated daemon home, wiped below, so the job never reuses state.
       PASEO_HOME: /tmp/paseo-install-smoke/home
-      # Cumulative mirror target set: every plugin directory plus helper. Always
-      # the full set so the staged tree matches what the mirror publishes (a
+      # Cumulative mirror target set: every plugin directory plus helper and shared packages.
+      # Always the full set so the staged tree matches what the mirror publishes (a
       # subset target would prune the other plugins from the public repo).
-      MIRROR_TARGETS: "top,mcp-tools,forges,x-comms,slash,twofado,plugin-updates,helper"
+      MIRROR_TARGETS: "top,mcp-tools,forges,x-comms,slash,twofado,plugin-updates,helper,paseo-plugin-ui,backend,mcp-gateway"
       DEFAULT_PLUGINS: "mcp-tools forges x-comms slash twofado plugin-updates top"
       MIRROR_URL_IN: ${{ github.event.inputs.mirror_url }}
       MIRROR_REF_IN: ${{ github.event.inputs.mirror_ref }}

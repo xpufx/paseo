@@ -37,8 +37,19 @@ const selectedTargets = new Set();
 for (const arg of args) {
   if (arg.startsWith("--target=") || arg.startsWith("--plugin=") || arg.startsWith("--include=")) {
     const val = arg.split("=")[1].trim();
-    val.split(",").map(t => t.trim()).filter(Boolean).forEach(t => selectedTargets.add(t));
+    val.split(",").map(t => t.trim()).filter(Boolean).forEach(t => {
+      let target = t;
+      if (target.startsWith("packages/")) target = target.slice("packages/".length);
+      else if (target.startsWith("plugins/")) target = target.slice("plugins/".length);
+      selectedTargets.add(target);
+    });
   }
+}
+
+// Normalize package aliases
+if (selectedTargets.has("ui")) {
+  selectedTargets.delete("ui");
+  selectedTargets.add("paseo-plugin-ui");
 }
 
 // Normalize helper aliases
@@ -61,9 +72,39 @@ if (isDryRun) {
   console.log(`[mirror-github] DRY-RUN MODE: No changes will be pushed to remote.`);
 }
 
-// 0. Refuse linked dev state: vendor symlinks must be materialized copies.
+// 0. Discover existing plugins and packages in workspace
+const allAvailablePlugins = fs.existsSync("plugins")
+  ? fs.readdirSync("plugins", { withFileTypes: true }).filter(d => d.isDirectory()).map(d => d.name)
+  : [];
+
+const allAvailablePackages = fs.existsSync("packages")
+  ? fs.readdirSync("packages", { withFileTypes: true }).filter(d => d.isDirectory()).map(d => d.name)
+  : [];
+
+// Determine which packages under packages/ are retained
+const retainedPackages = new Set();
+if (isAll) {
+  allAvailablePackages.forEach(pkg => retainedPackages.add(pkg));
+} else {
+  if (includesHelper) {
+    retainedPackages.add("paseo-plugin-helper");
+  }
+  for (const pkg of allAvailablePackages) {
+    if (
+      selectedTargets.has(pkg) ||
+      [...selectedTargets].some(t => t.startsWith(`${pkg}/`))
+    ) {
+      retainedPackages.add(pkg);
+    }
+  }
+}
+
+// Refuse linked dev state: vendor symlinks must be materialized copies.
 const linkedVendors = [];
-for (const p of selectedTargets) {
+const pluginsToCheck = isAll
+  ? allAvailablePlugins
+  : allAvailablePlugins.filter(p => selectedTargets.has(p));
+for (const p of pluginsToCheck) {
   for (const tree of ["client", "server", "shared"]) {
     const v = path.join("plugins", p, tree, "vendor", "paseo-plugin-helper");
     try {
@@ -88,16 +129,7 @@ try {
   remoteDestination = targetUrl;
 }
 
-// 2. Discover existing plugins and packages in workspace
-const allAvailablePlugins = fs.existsSync("plugins")
-  ? fs.readdirSync("plugins", { withFileTypes: true }).filter(d => d.isDirectory()).map(d => d.name)
-  : [];
-
-const allAvailablePackages = fs.existsSync("packages")
-  ? fs.readdirSync("packages", { withFileTypes: true }).filter(d => d.isDirectory()).map(d => d.name)
-  : [];
-
-// Determine paths to prune from the isolated index
+// 2. Determine paths to prune from the isolated index
 const unwantedPaths = [];
 
 // Tracked symlink into the platform checkout; would ship as a dangling link.
@@ -110,12 +142,11 @@ if (!isAll) {
     }
   }
 
-  if (!includesHelper) {
+  if (retainedPackages.size === 0) {
     unwantedPaths.push("packages");
   } else {
-    // If helper is included, prune any other package in packages/ that wasn't targeted
     for (const pkg of allAvailablePackages) {
-      if (pkg !== "paseo-plugin-helper" && !selectedTargets.has(pkg)) {
+      if (!retainedPackages.has(pkg)) {
         unwantedPaths.push(`packages/${pkg}`);
       }
     }
@@ -155,16 +186,24 @@ try {
   const rootPkgRaw = fs.readFileSync("package.json", "utf-8");
   const rootPkg = JSON.parse(rootPkgRaw);
 
+  const rawWorkspaces = Array.isArray(rootPkg.workspaces) ? rootPkg.workspaces : [];
   const scopedWorkspaces = [];
-  if (includesHelper) {
-    scopedWorkspaces.push("packages/paseo-plugin-helper");
-  }
+
   if (isAll) {
-    allAvailablePlugins.forEach(p => scopedWorkspaces.push(`plugins/${p}`));
+    scopedWorkspaces.push(...rawWorkspaces);
   } else {
-    for (const p of selectedTargets) {
-      if (allAvailablePlugins.includes(p)) {
-        scopedWorkspaces.push(`plugins/${p}`);
+    for (const ws of rawWorkspaces) {
+      if (ws.startsWith("plugins/")) {
+        const pluginName = ws.slice("plugins/".length);
+        if (selectedTargets.has(pluginName)) {
+          scopedWorkspaces.push(ws);
+        }
+      } else if (ws.startsWith("packages/")) {
+        const pkgRel = ws.slice("packages/".length);
+        const topPkg = pkgRel.split("/")[0];
+        if (retainedPackages.has(topPkg)) {
+          scopedWorkspaces.push(ws);
+        }
       }
     }
   }

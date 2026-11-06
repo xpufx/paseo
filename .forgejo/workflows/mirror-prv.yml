@@ -31,9 +31,9 @@ jobs:
     container:
       image: forge.mrs.uppidi.com/xpufx-org/runner-containers/paseo-ci:latest
     env:
-      # Cumulative mirror target set: every plugin directory plus helper. Must
-      # match install-smoke.yml — a subset would prune plugins from the target.
-      MIRROR_TARGETS: "top,mcp-tools,forges,x-comms,slash,twofado,plugin-updates,helper"
+      # Cumulative mirror target set: every plugin directory plus helper and shared packages.
+      # Must match install-smoke.yml — a subset would prune plugins from the target.
+      MIRROR_TARGETS: "top,mcp-tools,forges,x-comms,slash,twofado,plugin-updates,helper,paseo-plugin-ui,backend,mcp-gateway"
       GIT_AUTHOR_NAME: paseo-mirror
       GIT_AUTHOR_EMAIL: mirror@paseo.invalid
       GIT_COMMITTER_NAME: paseo-mirror
