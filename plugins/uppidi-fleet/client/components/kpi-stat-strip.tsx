@@ -1,9 +1,9 @@
 import React, { useState } from "react";
 import {
-  StyleSheet,
   Text,
   View,
   type StyleProp,
+  type TextStyle,
   type ViewStyle,
 } from "react-native";
 import { Icon } from "@getpaseo/plugin/client/react-native";
@@ -473,7 +473,19 @@ export function KpiStatStrip({
   );
 }
 
-const styles = StyleSheet.create({
+const styles: {
+  stripContainer: ViewStyle;
+  tile: ViewStyle;
+  tileContent: ViewStyle;
+  tileHeader: ViewStyle;
+  tileTitleRow: ViewStyle;
+  tileLabel: TextStyle;
+  dot: ViewStyle;
+  tileValueRow: ViewStyle;
+  tileValueText: TextStyle;
+  activeFilterPill: ViewStyle;
+  tileSublabel: TextStyle;
+} = {
   stripContainer: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -540,4 +552,4 @@ const styles = StyleSheet.create({
     fontSize: 10,
     marginTop: 2,
   },
-});
+};
