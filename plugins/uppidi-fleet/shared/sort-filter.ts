@@ -751,6 +751,7 @@ export interface ProjectAgentGroup {
   isEnrolled?: boolean;
   isPaused?: boolean;
   hasOrchestrator?: boolean;
+  isDormant?: boolean;
   queuedHooksCount?: number;
   isDetached?: boolean;
 }
@@ -770,6 +771,7 @@ export type ProjectGroupSortField = ProjectSortField;
 export interface BuildProjectGroupsOptions {
   enrolledRepos?: string[];
   pausedRepos?: string[];
+  dormantRepos?: string[];
   repoQueuedHooks?: Record<string, number>;
   /**
    * Agent id of the Front Desk currently registered with the hook daemon
@@ -1287,6 +1289,10 @@ export function buildProjectGroups(
       pausedRepos.some((r) => isRepoMatching(r, projectName))
     );
 
+    const isDormant = Boolean(
+      options?.dormantRepos?.some((r) => isRepoMatching(r, projectName))
+    );
+
     let queuedHooksCount = 0;
     if (options?.repoQueuedHooks && typeof options.repoQueuedHooks === "object") {
       for (const [k, count] of Object.entries(options.repoQueuedHooks)) {
@@ -1306,6 +1312,7 @@ export function buildProjectGroups(
       isEnrolled,
       isPaused,
       hasOrchestrator,
+      isDormant,
       queuedHooksCount,
       isDetached,
     };

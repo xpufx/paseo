@@ -2504,7 +2504,10 @@ export function ProjectGroupCard({
               {group.isPaused && !onTogglePause && pausedBadge}
               {group.isEnrolled && (
                 <>
-                  {!group.hasOrchestrator && (
+                  {group.isDormant && (
+                    <Badge label="Dormant (Standby)" variant="warning" size="sm" textStyle={{ fontSize: 10 }} />
+                  )}
+                  {!group.hasOrchestrator && !group.isDormant && (
                     <Badge label="⚪ No Orchestrator" variant="neutral" size="sm" textStyle={{ fontSize: 10 }} />
                   )}
                   {(group.queuedHooksCount ?? 0) > 0 && (
@@ -2538,7 +2541,19 @@ export function ProjectGroupCard({
                 />
               )}
 
-              {group.isEnrolled && !group.hasOrchestrator && onAddOrchestrator && (
+              {group.isEnrolled && group.isDormant && onAddOrchestrator && (
+                <Button
+                  label="Wake Orchestrator"
+                  icon="Play"
+                  size="sm"
+                  variant="ghost"
+                  disabled={isActionLoading}
+                  loading={isActionLoading}
+                  onPress={() => onAddOrchestrator(group.projectName)}
+                />
+              )}
+
+              {group.isEnrolled && !group.hasOrchestrator && !group.isDormant && onAddOrchestrator && (
                 <Button
                   label="+ Add Orchestrator"
                   icon="Bot"
@@ -3047,6 +3062,7 @@ export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
     return buildProjectGroups(filteredTree, {
       enrolledRepos: agentsData?.enrolledRepos,
       pausedRepos: agentsData?.pausedRepos,
+      dormantRepos: agentsData?.dormantRepos,
       repoQueuedHooks: agentsData?.repoQueuedHooks,
       registeredFrontDeskAgentId,
       registryAuthoritative: agentsData?.registryAuthoritative ?? false,
@@ -3060,6 +3076,7 @@ export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
     const result = buildProjectGroups(baseTree, {
       enrolledRepos: agentsData?.enrolledRepos,
       pausedRepos: agentsData?.pausedRepos,
+      dormantRepos: agentsData?.dormantRepos,
       repoQueuedHooks: agentsData?.repoQueuedHooks,
       registeredFrontDeskAgentId,
       registryAuthoritative: agentsData?.registryAuthoritative ?? false,

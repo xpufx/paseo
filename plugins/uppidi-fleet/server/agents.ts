@@ -1124,7 +1124,7 @@ export async function handleUppidiAgents(
 
     // Parent-project inheritance already applied in fetchPaseoAgents (#530).
 
-    const { enrolledRepos, pausedRepos, kanbanOnlyRepos, repoQueuedHooks } = getFleetRosterInfo();
+    const { enrolledRepos, pausedRepos, kanbanOnlyRepos, repoQueuedHooks, dormantRepos } = getFleetRosterInfo();
 
     for (const a of agents) {
       const proj = a.project || DEFAULT_PROJECT;
@@ -1163,6 +1163,7 @@ export async function handleUppidiAgents(
       pausedRepos,
       kanbanOnlyRepos,
       repoQueuedHooks,
+      dormantRepos: dormantRepos ?? [],
       totalCount: agents.length,
       runningCount,
       idleCount,
@@ -1181,6 +1182,7 @@ export async function handleUppidiAgents(
       pausedRepos: [],
       kanbanOnlyRepos: [],
       repoQueuedHooks: {},
+      dormantRepos: [],
       totalCount: 0,
       runningCount: 0,
       idleCount: 0,

@@ -13871,4 +13871,292 @@ describe("Hook Router Launch Contract & Prompt Embedding (#1398)", () => {
   });
 });
 
+describe("Orchestrator Dormancy & Webhook Respawn (#1391)", () => {
+  let tmpDir: string;
+  let queueDir: string;
+  let stateDir: string;
 
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), "dormancy-test-"));
+    queueDir = join(tmpDir, "queues");
+    stateDir = join(tmpDir, "orchestrators");
+    mkdirSync(queueDir, { recursive: true });
+    mkdirSync(stateDir, { recursive: true });
+  });
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("evaluates quiescence and archives orchestrator with dormant-quiescent reason", async () => {
+    const archived: Array<{ id: string; reason?: string }> = [];
+    const router = new HookRouter({} as any, {
+      queueDir,
+      stateDir,
+      port: 0,
+      orchestratorDormancy: {
+        enabled: true,
+        idleMinutes: 10,
+        quiescentOnly: true,
+      },
+      archiveAgent: async (id: string, opts?: { reason?: string }) => {
+        archived.push({ id, reason: opts?.reason });
+        return true;
+      },
+    });
+
+    const repo = "xpufx-org/paseo";
+    const agentId = "orch-quiescent-1";
+    const t0 = 1_000_000;
+    router.writeOrchestrator(repo, agentId, "test");
+    router.recordRepoActivity(repo, t0);
+
+    // Initial check: not idle enough (elapsed 0 < 10m)
+    const early = await router.evaluateRepoDormancy(
+      repo,
+      { repo, ok: true, candidates: [] },
+      new Map([[agentId, { id: agentId, status: "idle" } as any]]),
+      t0 + 5 * 60 * 1000,
+    );
+    assert.equal(early.isDormant, false);
+    assert.equal(early.archived, false);
+    assert.equal(archived.length, 0);
+
+    // After 10 minutes idle with 0 tasks, 0 PRs, 0 workers:
+    const tLater = t0 + 11 * 60 * 1000;
+    const result = await router.evaluateRepoDormancy(
+      repo,
+      { repo, ok: true, candidates: [] },
+      new Map([[agentId, { id: agentId, status: "idle" } as any]]),
+      tLater,
+    );
+
+    assert.equal(result.isDormant, true);
+    assert.equal(result.archived, true);
+    assert.equal(archived.length, 1);
+    assert.equal(archived[0].id, agentId);
+    assert.equal(archived[0].reason, "dormant-quiescent");
+
+    const record = router.readOrchestrator(repo);
+    assert.equal(record?.isDormant, true);
+    assert.ok(record?.dormantAt);
+  });
+
+  it("does not enter dormancy when dispatchable tasks, WIP tasks, or active workers exist", async () => {
+    const archived: string[] = [];
+    const router = new HookRouter({} as any, {
+      queueDir,
+      stateDir,
+      port: 0,
+      orchestratorDormancy: {
+        enabled: true,
+        idleMinutes: 10,
+        quiescentOnly: true,
+      },
+      archiveAgent: async (id: string) => {
+        archived.push(id);
+        return true;
+      },
+    });
+
+    const repo = "xpufx-org/paseo";
+    const agentId = "orch-busy-1";
+    const t0 = 1_000_000;
+    const tLater = t0 + 20 * 60 * 1000;
+    router.writeOrchestrator(repo, agentId, "test");
+    router.recordRepoActivity(repo, t0);
+
+    // 1. Blocked by dispatchable task
+    const blockedByDispatchable = await router.evaluateRepoDormancy(
+      repo,
+      {
+        repo,
+        ok: true,
+        candidates: [
+          { number: 1, title: "task 1", labels: [], category: "dispatchable", is_dispatchable: true, reason: "" },
+        ],
+      },
+      new Map([[agentId, { id: agentId, status: "idle" } as any]]),
+      tLater,
+    );
+    assert.equal(blockedByDispatchable.isDormant, false);
+
+    // 2. Blocked by active worker
+    const blockedByWorker = await router.evaluateRepoDormancy(
+      repo,
+      { repo, ok: true, candidates: [] },
+      new Map([
+        [agentId, { id: agentId, status: "idle" } as any],
+        ["worker-1", { id: "worker-1", status: "running", labels: { "paseo.parent-agent-id": agentId } } as any],
+      ]),
+      tLater,
+    );
+    assert.equal(blockedByWorker.isDormant, false);
+    assert.equal(archived.length, 0);
+  });
+
+  it("pruneOrchestrators preserves dormant orchestrator records across multiple grace sweeps", async () => {
+    const router = new HookRouter({} as any, {
+      queueDir,
+      stateDir,
+      port: 0,
+    });
+    const repo = "xpufx-org/paseo";
+    router.enrollRepo(repo);
+    router.writeOrchestrator(repo, "orch-dead-1", "test");
+
+    // Mark it dormant
+    const record = router.readOrchestrator(repo)!;
+    record.isDormant = true;
+    record.dormantAt = new Date().toISOString();
+    (router as any).persistOrchestratorRecord(record);
+
+    // Empty agent map (agent absent from daemon)
+    const emptyMap = new Map();
+    // Run 5 sweeps (grace is 3)
+    for (let i = 0; i < 5; i++) {
+      const res = await router.pruneOrchestrators({
+        agentMap: emptyMap,
+        graceSweeps: 3,
+        verifyAgentAbsent: async () => true,
+      });
+      assert.equal(res.ok, true);
+      assert.equal(res.prunedCount, 0);
+    }
+
+    // Record should still exist and still be dormant
+    const after = router.readOrchestrator(repo);
+    assert.ok(after);
+    assert.equal(after?.isDormant, true);
+  });
+
+  it("suppresses passive webhooks for dormant repos", async () => {
+    const router = new HookRouter({} as any, {
+      queueDir,
+      stateDir,
+      port: 0,
+    });
+    const repo = "xpufx-org/paseo";
+    router.enrollRepo(repo);
+    router.writeOrchestrator(repo, "orch-1", "test");
+    const rec = router.readOrchestrator(repo)!;
+    rec.isDormant = true;
+    (router as any).persistOrchestratorRecord(rec);
+
+    // Passive webhook (e.g., label update by bot)
+    const passivePayload = {
+      repository: { full_name: repo },
+      action: "labeled",
+      issue: { number: 10, title: "Test", labels: [{ name: "state/wip" }] },
+      sender: { login: "paseo-bot" },
+    };
+
+    const outcome = await router.ingestWebhook("issues", passivePayload);
+    assert.equal(outcome.result, "suppressed");
+    assert.equal(router.getQueue(repo).length, 0);
+  });
+
+  it("respawns dormant orchestrator on actionable webhook and enqueues event", async () => {
+    let spawnedRepo: string | null = null;
+    const router = new HookRouter({} as any, {
+      queueDir,
+      stateDir,
+      port: 0,
+      workspacesData: [
+        {
+          workspaceId: "wks-1",
+          cwd: "/test/mock-workspace/paseo",
+          projectId: "proj-1",
+        },
+      ],
+      projectsData: [
+        {
+          projectId: "proj-1",
+          projectKey: "forge.mrs.uppidi.com/xpufx-org/paseo",
+        },
+      ],
+      spawnAgent: async (opts: any) => {
+        spawnedRepo = opts.labels?.["paseo.repo"] ?? opts.title;
+        return { id: "orch-respawned-1" };
+      },
+    });
+
+    const repo = "xpufx-org/paseo";
+    router.enrollRepo(repo);
+    router.writeOrchestrator(repo, "orch-old", "test");
+    const rec = router.readOrchestrator(repo)!;
+    rec.isDormant = true;
+    (router as any).persistOrchestratorRecord(rec);
+
+    // Actionable webhook (human opened an issue)
+    const actionablePayload = {
+      repository: { full_name: repo },
+      action: "opened",
+      issue: { number: 42, title: "Urgent fix", labels: [] },
+      sender: { login: "human-dev" },
+    };
+
+    const outcome = await router.handleWebhookPayload("issues", actionablePayload);
+    assert.ok(
+      ["buffered", "direct", "coalesced", "disabled"].includes(outcome.result),
+      `Unexpected outcome result: ${outcome.result}`,
+    );
+
+    const updated = router.readOrchestrator(repo);
+    assert.ok(updated);
+    assert.equal(updated?.agentId, "orch-respawned-1");
+    assert.equal(updated?.isDormant, false);
+  });
+
+  it("watchdog skips missing and error alerts for dormant orchestrator", async () => {
+    const alerts: string[] = [];
+    const router = new HookRouter({} as any, {
+      queueDir,
+      stateDir,
+      port: 0,
+    });
+
+    const repo = "xpufx-org/paseo";
+    router.enrollRepo(repo);
+    router.writeOrchestrator(repo, "orch-dormant-absent", "test");
+    const rec = router.readOrchestrator(repo)!;
+    rec.isDormant = true;
+    (router as any).persistOrchestratorRecord(rec);
+
+    const emptyMap = new Map();
+    const audit = await router.runWatchdogAudit({
+      agentMap: emptyMap,
+      deliver: async (id, msg) => {
+        alerts.push(msg);
+        return true;
+      },
+    });
+
+    assert.equal(audit.ok, true);
+    const missingAnomalies = audit.anomalies.filter((a) => a.type === "ORCHESTRATOR_MISSING");
+    assert.equal(missingAnomalies.length, 0);
+    assert.equal(alerts.length, 0);
+  });
+
+  it("reports dormant repos in getFleetRosterInfo", async () => {
+    const router = new HookRouter({} as any, {
+      queueDir,
+      stateDir,
+      port: 0,
+    });
+    setActiveHookRouter(router);
+    try {
+      const repo = "xpufx-org/dormant-repo";
+      router.enrollRepo(repo);
+      router.writeOrchestrator(repo, "orch-1", "test");
+      const rec = router.readOrchestrator(repo)!;
+      rec.isDormant = true;
+      (router as any).persistOrchestratorRecord(rec);
+
+      const rosterInfo = getFleetRosterInfo();
+      assert.ok(rosterInfo.dormantRepos.some((r) => r.includes("dormant-repo")));
+    } finally {
+      setActiveHookRouter(null);
+    }
+  });
+});

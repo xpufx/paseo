@@ -132,6 +132,7 @@ interface ReadFleetOptions {
     home?: string;
     enrolledRepos?: string[];
     mutedRepos?: string[];
+    dormantRepos?: string[];
     execFileAsync?: (file: string, args: readonly string[], options?: any) => Promise<{
         stdout: string;
         stderr?: string;
@@ -148,11 +149,13 @@ declare function buildFleetOutput(agents: FleetAgent[], options?: {
     pausedRepos?: string[];
     kanbanOnlyRepos?: string[];
     repoQueuedHooks?: Record<string, number>;
+    dormantRepos?: string[];
 }): FleetOutput;
 declare function readFleetRoster(context?: any, options?: ReadFleetOptions & {
     pausedRepos?: string[];
     kanbanOnlyRepos?: string[];
     repoQueuedHooks?: Record<string, number>;
+    dormantRepos?: string[];
     workspaceProjectMap?: WorkspaceProjectMap;
     workspacesData?: readonly WorkspaceRecord[];
     projectsData?: readonly ProjectRecord[];

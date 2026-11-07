@@ -24,6 +24,7 @@ export interface ReadFleetOptions {
   home?: string;
   enrolledRepos?: string[];
   mutedRepos?: string[];
+  dormantRepos?: string[];
   execFileAsync?: (
     file: string,
     args: readonly string[],
@@ -131,6 +132,7 @@ export function buildFleetOutput(
     pausedRepos?: string[];
     kanbanOnlyRepos?: string[];
     repoQueuedHooks?: Record<string, number>;
+    dormantRepos?: string[];
   },
 ): FleetOutput {
   const frontDesk: FleetAgent[] = [];
@@ -179,6 +181,7 @@ export function buildFleetOutput(
     kanbanOnlyRepos,
     mutedRepos,
     repoQueuedHooks,
+    dormantRepos: options?.dormantRepos ?? [],
     totalCount: agents.length,
     runningCount,
     idleCount,
@@ -192,6 +195,7 @@ export async function readFleetRoster(
     pausedRepos?: string[];
     kanbanOnlyRepos?: string[];
     repoQueuedHooks?: Record<string, number>;
+    dormantRepos?: string[];
     workspaceProjectMap?: WorkspaceProjectMap;
     workspacesData?: readonly WorkspaceRecord[];
     projectsData?: readonly ProjectRecord[];

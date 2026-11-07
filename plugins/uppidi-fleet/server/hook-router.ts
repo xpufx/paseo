@@ -483,7 +483,7 @@ export interface HookRouterOptions {
   /**
    * Injected agent archiver used by deduplication, prune, and tests (#973/#993).
    */
-  archiveAgent?: (agentId: string) => Promise<boolean>;
+  archiveAgent?: (agentId: string, opts?: { reason?: string }) => Promise<boolean>;
   /**
    * Injected Front Desk spawner for rotation tests (#1019). Production falls
    * back to `handleUppidiCreateFrontDesk`, the existing Front Desk primitive.
@@ -496,6 +496,14 @@ export interface HookRouterOptions {
   rotationAutoEnabled?: boolean;
   /** Injected IssuesCheckIo for deterministic board checks and sweeps (#1413). */
   issuesCheckIo?: IssuesCheckIo;
+  /**
+   * Orchestrator dormancy settings override (#1391).
+   */
+  orchestratorDormancy?: {
+    enabled?: boolean;
+    idleMinutes?: number;
+    quiescentOnly?: boolean;
+  };
 }
 
 export interface EnsureOrchestratorInput {
@@ -567,6 +575,10 @@ export interface OrchestratorRecord {
   closedSweeps?: number;
   /** ISO timestamp of the first closed observation in the current streak (#1077). */
   firstClosedAt?: string | null;
+  /** True when the orchestrator was gracefully shutdown due to quiescence (#1391). */
+  isDormant?: boolean;
+  /** ISO timestamp when the orchestrator entered dormancy (#1391). */
+  dormantAt?: string | null;
 }
 
 /**
@@ -5026,6 +5038,8 @@ export class HookRouter {
   private quiescent = false;
   /** Last transition in or out of quiescence (#1181). */
   public lastQuiescenceChangeAt: number | null = null;
+  /** Per-repo last active timestamp (#1391). */
+  private lastRepoActiveTimes = new Map<string, number>();
   /** Per-repo SHA256 digest of the last actionable sweep set (#1181). */
   private readonly lastSweepActionDigests = new Map<string, string>();
   /** Failure signature of the last sweep, for error-state change detection (#1181). */
@@ -5430,7 +5444,6 @@ export class HookRouter {
       return { key: targetKey, result: "suppressed", frontDesk: isFd, bypass: false };
     }
     const ev = String(event ?? "unknown");
-
     // Direct-action guards (#847) run off the critical path: the delivery is
     // acknowledged immediately and the guard acts asynchronously. Both are
     // disabled by default under test so fixtures never touch the network.
@@ -5438,9 +5451,10 @@ export class HookRouter {
     // dormancy/quiescence filtering (#1463).
     void this.runDirectActions(ev, body);
 
+    const isActionable = isActionableWakeupEvent(ev, body);
     // Quiescence (#1181): an actionable wakeup clears dormancy immediately; a
     // passive event while quiescent must not wake the fleet at all.
-    if (isActionableWakeupEvent(ev, body)) {
+    if (isActionable) {
       this.exitQuiescence(`actionable webhook ${ev}`);
     } else if (this.quiescent && !isFd) {
       this.log(`[info] Suppressing passive webhook ${ev} for ${targetKey} while fleet is dormant (#1181)`);
@@ -5467,6 +5481,10 @@ export class HookRouter {
     }
 
     const orch = isFd ? null : this.readOrchestrator(repoKey);
+    if (!isFd && orch?.isDormant && !isActionable) {
+      this.log(`[info] Suppressing passive webhook ${ev} for dormant repo ${repoKey} (#1391)`);
+      return { key: repoKey, result: "suppressed", frontDesk: false, bypass: false };
+    }
     if (!isFd && !bypass && ev === "issue_comment") {
       const stampedId = envelopeAgentId(body);
       if (orch && stampedId && stampedId === orch.agentId.slice(0, 7)) {
@@ -5488,6 +5506,8 @@ export class HookRouter {
       return { key: repoKey, result: "ignored", frontDesk: false, bypass: false };
     }
 
+    this.recordRepoActivity(repoKey);
+
     const result = this.coalesceOrSend({
       repoKey,
       issue,
@@ -5502,14 +5522,34 @@ export class HookRouter {
       sosState,
     });
 
-    // Queue ingress self-heal (#889): an enrolled repo receiving work with no
-    // registered orchestrator is staffed without blocking webhook ack.
-    if (!orch && !bypass) {
+    // Queue ingress self-heal (#889) and on-demand dormant webhook respawn (#1391):
+    // An enrolled repo receiving work with a dormant or missing orchestrator is staffed.
+    const wasDormant = Boolean(orch?.isDormant);
+    if (wasDormant && isActionable) {
+      this.log(`[info] Actionable event ${ev} received for dormant repo ${repoKey}; respawning orchestrator (#1391)`);
+      try {
+        await this.ensureOrchestrator({ repo: repoKey });
+      } catch (err) {
+        this.log(`[warn] Dormant respawn failed for ${repoKey}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    } else if (!orch && !bypass) {
       void this.ensureUnstaffedEnrolledRepo(repoKey, { reason: "webhook ingress" }).catch((err) =>
         this.log(`[warn] Auto-ensure failed for ${repoKey}: ${err instanceof Error ? err.message : String(err)}`),
       );
     }
     return { key: repoKey, result, frontDesk: false, bypass };
+  }
+
+  /**
+   * Alias for webhook payload ingress (#1391).
+   */
+  public async handleWebhookPayload(event: string, body: any): Promise<{
+    key: string;
+    result: CoalesceResult;
+    frontDesk: boolean;
+    bypass: boolean;
+  }> {
+    return this.ingestWebhook(event, body);
   }
 
   // -------------------------------------------------------------------------
@@ -7454,6 +7494,8 @@ export class HookRouter {
               staleReason: parsed.staleReason ?? null,
               closedSweeps: typeof parsed.closedSweeps === "number" ? parsed.closedSweeps : 0,
               firstClosedAt: parsed.firstClosedAt ?? null,
+              isDormant: Boolean(parsed.isDormant),
+              dormantAt: parsed.dormantAt ?? null,
             };
           }
         } catch {
@@ -7477,6 +7519,10 @@ export class HookRouter {
       stale: false,
       staleSince: null,
       staleReason: null,
+      closedSweeps: 0,
+      firstClosedAt: null,
+      isDormant: false,
+      dormantAt: null,
     });
   }
 
@@ -7790,6 +7836,191 @@ export class HookRouter {
     this.log(`[info] Fleet exited quiescence on ${reason}; active dispatch restored (#1181)`);
   }
 
+  /**
+   * Record last active timestamp for a repository (#1391).
+   */
+  public recordRepoActivity(repo: string, ts: number = Date.now()): void {
+    const canonical = canonicalRepoKey(repo) ?? repo;
+    this.lastRepoActiveTimes.set(canonical, ts);
+  }
+
+  /**
+   * Get resolved orchestrator dormancy settings (#1391).
+   */
+  public getDormancySettings(): { enabled: boolean; idleMinutes: number; quiescentOnly: boolean } {
+    const fromOpts = this.options?.orchestratorDormancy;
+    let fromConfig: { enabled?: boolean; idleMinutes?: number; quiescentOnly?: boolean } | undefined;
+    try {
+      fromConfig = getUppidiFleetSettingsStorage().read()?.orchestratorDormancy;
+    } catch {
+      // ignore
+    }
+    return {
+      enabled: Boolean(fromOpts?.enabled ?? fromConfig?.enabled ?? false),
+      idleMinutes: Number(fromOpts?.idleMinutes ?? fromConfig?.idleMinutes ?? 30),
+      quiescentOnly: Boolean(fromOpts?.quiescentOnly ?? fromConfig?.quiescentOnly ?? true),
+    };
+  }
+
+  /**
+   * Evaluate a repository for orchestrator dormancy (#1391).
+   * Transitions quiescent orchestrator sessions into graceful dormancy
+   * when 0 dispatchable tasks, 0 WIP tasks, 0 open PRs/reviews, 0 active child workers,
+   * and idle elapsed > idleMinutes.
+   */
+  public async evaluateRepoDormancy(
+    repo: string,
+    checkResult?: BoardCheckResult | null,
+    agentMap?: Map<string, WatchdogAgent> | null,
+    nowMs: number = Date.now(),
+  ): Promise<{ isDormant: boolean; archived: boolean; reason?: string }> {
+    const settings = this.getDormancySettings();
+    if (!settings.enabled) {
+      return { isDormant: false, archived: false, reason: "dormancy disabled" };
+    }
+
+    const canonical = canonicalRepoKey(repo) ?? repo;
+    const record = this.readOrchestrator(canonical);
+    if (!record || !record.agentId) {
+      return { isDormant: false, archived: false, reason: "no registered orchestrator" };
+    }
+    if (record.isDormant) {
+      return { isDormant: true, archived: false, reason: "already dormant" };
+    }
+
+    // 1. Queue depth must be 0
+    const queueDepth = candidateRepoKeys(canonical).reduce(
+      (sum, k) => sum + (this.queues.get(k)?.length ?? 0),
+      0,
+    );
+    if (queueDepth > 0) {
+      this.recordRepoActivity(canonical, nowMs);
+      return { isDormant: false, archived: false, reason: "queue depth > 0" };
+    }
+
+    // 2. Candidates check (dispatchable, wip, and open PRs must be 0)
+    if (checkResult && Array.isArray(checkResult.candidates)) {
+      const dispatchable = checkResult.candidates.filter((c) => c.is_dispatchable).length;
+      if (dispatchable > 0) {
+        this.recordRepoActivity(canonical, nowMs);
+        return { isDormant: false, archived: false, reason: "dispatchable tasks pending" };
+      }
+
+      const wipCount = checkResult.candidates.filter(
+        (c) =>
+          c.category === "in_progress" ||
+          (c.labels ?? []).some((l) => l === "state/1-wip" || l === "state/wip" || l.includes("wip")),
+      ).length;
+      if (wipCount > 0) {
+        this.recordRepoActivity(canonical, nowMs);
+        return { isDormant: false, archived: false, reason: "wip tasks in progress" };
+      }
+
+      const openPrs = checkResult.candidates.filter(
+        (c) =>
+          c.category === "verification" ||
+          (c.labels ?? []).some(
+            (l) => l.startsWith("review/") || l === "state/2-review" || l === "state/review" || l.includes("pr"),
+          ),
+      ).length;
+      if (openPrs > 0) {
+        this.recordRepoActivity(canonical, nowMs);
+        return { isDormant: false, archived: false, reason: "open PRs pending review" };
+      }
+    }
+
+    // 3. Active child workers must be 0
+    const map = agentMap ?? this.latestAgentMap;
+    if (map) {
+      const workers = countActiveWorkers(map, record.agentId);
+      if (workers > 0) {
+        this.recordRepoActivity(canonical, nowMs);
+        return { isDormant: false, archived: false, reason: "active child workers" };
+      }
+
+      for (const a of map.values()) {
+        if (a.id === record.agentId) continue;
+        const status = String(a.status ?? "").toLowerCase();
+        if (status === "running" || status === "working" || Boolean(a.activeTurn)) {
+          const parentId = a.labels?.["paseo.parent-agent-id"] ?? (a as any).parentAgentId;
+          const agentRepo = (a as any).repo ?? a.labels?.["paseo.repo"];
+          if (parentId === record.agentId || (agentRepo && canonicalRepoKey(agentRepo) === canonical)) {
+            this.recordRepoActivity(canonical, nowMs);
+            return { isDormant: false, archived: false, reason: "active child workers" };
+          }
+        }
+      }
+
+      // 4. Orchestrator turn must not be in-flight
+      const orchAgent = map.get(record.agentId);
+      if (orchAgent) {
+        const orchStatus = String(orchAgent.status ?? "").toLowerCase();
+        if (
+          orchStatus === "running" ||
+          orchStatus === "working" ||
+          orchStatus === "busy" ||
+          Boolean(orchAgent.activeTurn)
+        ) {
+          this.recordRepoActivity(canonical, nowMs);
+          return { isDormant: false, archived: false, reason: "orchestrator turn running" };
+        }
+      }
+    }
+
+    if (this.isAgentBusy(record.agentId, map)) {
+      this.recordRepoActivity(canonical, nowMs);
+      return { isDormant: false, archived: false, reason: "orchestrator busy" };
+    }
+
+    // 5. Idle duration check
+    let lastActive = this.lastRepoActiveTimes.get(canonical);
+    if (!lastActive) {
+      if (record.updatedAt) {
+        const ts = Date.parse(record.updatedAt);
+        if (!Number.isNaN(ts)) lastActive = ts;
+      } else if (record.lastSeenAt) {
+        const ts = Date.parse(record.lastSeenAt);
+        if (!Number.isNaN(ts)) lastActive = ts;
+      }
+    }
+    if (!lastActive) {
+      this.lastRepoActiveTimes.set(canonical, nowMs);
+      return { isDormant: false, archived: false, reason: "activity time initialized" };
+    }
+
+    const elapsedMs = nowMs - lastActive;
+    const requiredIdleMs = settings.idleMinutes * 60 * 1000;
+    if (elapsedMs < requiredIdleMs) {
+      return {
+        isDormant: false,
+        archived: false,
+        reason: `idle duration ${Math.round(elapsedMs / 60000)}m < ${settings.idleMinutes}m`,
+      };
+    }
+
+    // Quiescence criteria satisfied: archive orchestrator and transition to dormant
+    this.log(
+      `[info] Quiescence threshold reached for ${canonical} (${record.agentId}) after ${Math.round(elapsedMs / 60000)}m idle; shutting down orchestrator (#1391)`,
+    );
+
+    let archived = false;
+    try {
+      archived = await this.archiveAgent(record.agentId, { reason: "dormant-quiescent" });
+    } catch (err) {
+      this.log(`[warn] Dormant archival failed for ${record.agentId}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    const updatedRecord: OrchestratorRecord = {
+      ...record,
+      isDormant: true,
+      dormantAt: new Date(nowMs).toISOString(),
+      updatedAt: new Date(nowMs).toISOString(),
+    };
+    this.persistOrchestratorRecord(updatedRecord);
+
+    return { isDormant: true, archived, reason: "dormant-quiescent" };
+  }
+
   private deliverWatchdogAlert(
     frontDeskId: string,
     alert: string,
@@ -7975,19 +8206,22 @@ export class HookRouter {
     }
   }
 
-  /** Archive a dead session so it stops accumulating in `paseo ls` (#973, #1115). */
-  public async archiveAgent(agentId: string, reason?: string): Promise<boolean> {
+  /** Archive a dead session so it stops accumulating in `paseo ls` (#973, #1115, #1391). */
+  public async archiveAgent(agentId: string, optsOrReason?: string | { reason?: string }): Promise<boolean> {
     const id = String(agentId ?? "").trim();
     if (!id) return false;
-    const effectiveReason = reason ?? "automated-cleanup";
+    const effectiveReason = typeof optsOrReason === "string"
+      ? optsOrReason
+      : (optsOrReason?.reason ?? "automated-cleanup");
+    const opts = typeof optsOrReason === "object" && optsOrReason !== null ? optsOrReason : { reason: effectiveReason };
 
     if (typeof this.options?.archiveAgent === "function") {
       try {
-        const ok = await this.options.archiveAgent(id);
+        const ok = await (this.options.archiveAgent as any)(id, opts);
         if (ok) {
           operationsLogger.log(`[OP] archiveAgent target=${id} actor=hook-router reason="${effectiveReason}"`);
         }
-        return ok;
+        return Boolean(ok);
       } catch (err) {
         this.log(
           `[warn] Custom archiveAgent failed for ${id}: ${err instanceof Error ? err.message : String(err)}`,
@@ -8087,8 +8321,10 @@ export class HookRouter {
       repoWorkspaceCwd = null;
     }
 
+    const preferredAgentId = existing?.isDormant ? undefined : existing?.agentId;
+
     if (agentMap) {
-      const matching = findLiveOrchestratorAgents(repo, agentMap, existing?.agentId, repoWorkspaceCwd);
+      const matching = findLiveOrchestratorAgents(repo, agentMap, preferredAgentId, repoWorkspaceCwd);
       if (matching.length > 0) {
         return await adoptAndDeduplicate(matching);
       }
@@ -8106,7 +8342,7 @@ export class HookRouter {
       }
       if (fresh) {
         agentMap = fresh;
-        const matching = findLiveOrchestratorAgents(repo, agentMap, existing?.agentId, repoWorkspaceCwd);
+        const matching = findLiveOrchestratorAgents(repo, agentMap, preferredAgentId, repoWorkspaceCwd);
         if (matching.length > 0) {
           return await adoptAndDeduplicate(matching);
         }
@@ -8114,7 +8350,7 @@ export class HookRouter {
     }
 
     // No roster could be read at all: fall back to the id-only live list.
-    if (!agentMap && existing?.agentId) {
+    if (!agentMap && existing?.agentId && !existing.isDormant) {
       try {
         const activeIds = await this.getActiveAgentIds();
         if (activeIds.has(existing.agentId)) {
@@ -8878,6 +9114,8 @@ export class HookRouter {
                 staleReason: parsed.staleReason ?? null,
                 closedSweeps: typeof parsed.closedSweeps === "number" ? parsed.closedSweeps : 0,
                 firstClosedAt: parsed.firstClosedAt ?? null,
+                isDormant: Boolean(parsed.isDormant),
+                dormantAt: parsed.dormantAt ?? null,
               };
               const canonical = canonicalRepoKey(rec.key) ?? rec.key;
               const existing = recordsMap.get(canonical);
@@ -9862,6 +10100,8 @@ export class HookRouter {
         if (!agentId) continue;
         // Skip orchestrator records for unenrolled repos (#1214)
         if (!this.isEnrolledRepo(key)) continue;
+        // Skip dormant orchestrators (#1391)
+        if (record.isDormant === true) continue;
         // Suppressed when the orchestrator was legitimately culled (#872).
         if (this.isTeardownSuppressedAgent(agentId)) continue;
         const agent = agentMap.get(agentId);
@@ -10382,7 +10622,7 @@ export class HookRouter {
     /** Persisted metadata directory used by the default verifier (#889). */
     agentsDir?: string;
     /** Archives a closed session before its registration is unlinked (#973). */
-    archiveAgent?: (agentId: string) => Promise<boolean>;
+    archiveAgent?: (agentId: string, opts?: { reason?: string }) => Promise<boolean>;
     now?: number;
   } = {}): Promise<PruneResult> {
     let agentMap = opts.agentMap ?? null;
@@ -10423,6 +10663,11 @@ export class HookRouter {
         if (res.ok) {
           pruned.push({ key, agentId, reason: "unenrolled repo unlinked" });
         }
+        continue;
+      }
+
+      // Dormant orchestrator: preservation across sweeps (#1391)
+      if (record.isDormant === true) {
         continue;
       }
 
@@ -11646,6 +11891,14 @@ export class HookRouter {
           allDecisionTraces.push(...res.decisionTraces);
         }
         sweepDigests.set(repo, res.ok ? this.actionableDigest(res.candidates) : "#board-check-error");
+
+        // Evaluate dormancy during board sweep (#1391)
+        try {
+          await this.evaluateRepoDormancy(repo, res, liveAgentMap, nowMs);
+        } catch (err) {
+          this.log(`[warn] Dormancy evaluation failed for ${repo}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+
         if (!res.ok || res.candidates.length === 0) continue;
         const dispatchable = res.candidates.filter((c) => c.is_dispatchable).length;
 
@@ -13056,11 +13309,12 @@ export class HookRouter {
       if (key === "frontdesk") {
         targetAgentId = this.readFrontDesk()?.agentId ?? null;
       } else {
-        targetAgentId = this.readOrchestrator(key)?.agentId ?? null;
+        const orchRec = this.readOrchestrator(key);
+        targetAgentId = orchRec?.isDormant ? null : orchRec?.agentId ?? null;
       }
 
       if (!targetAgentId) {
-        // No target orchestrator / frontdesk registered yet. Leave messages queued.
+        // No target orchestrator / frontdesk registered yet (or orchestrator is dormant). Leave messages queued.
         return;
       }
 
@@ -14696,6 +14950,7 @@ export function getFleetRosterInfo(): {
   pausedRepos: string[];
   kanbanOnlyRepos: string[];
   repoQueuedHooks: Record<string, number>;
+  dormantRepos: string[];
 } {
   const router = getActiveHookRouter();
   const home = resolveHostHome();
@@ -14704,6 +14959,36 @@ export function getFleetRosterInfo(): {
   const kanbanOnlyRepos = router ? router.getKanbanOnlyRepos() : (config.kanbanOnlyRepos ?? []);
 
   const enrolledSet = new Set<string>(router ? router.getEnrolledRepos() : (config.enrolledRepos ?? []));
+
+  const dormantRepos: string[] = [];
+  if (router) {
+    for (const r of router.listOrchestratorRecords()) {
+      if (r.isDormant) {
+        dormantRepos.push(r.key);
+      }
+    }
+  } else {
+    const orchDir = join(home, ".config", "uppidi-fleet", "orchestrators");
+    if (existsSync(orchDir)) {
+      try {
+        const files = readdirSync(orchDir);
+        for (const f of files) {
+          if (!f.endsWith(".json") || f === "frontdesk.json") continue;
+          try {
+            const raw = readFileSync(join(orchDir, f), "utf8");
+            const parsed = JSON.parse(raw);
+            if (parsed?.isDormant && parsed?.key) {
+              dormantRepos.push(parsed.key);
+            }
+          } catch {
+            // ignore malformed
+          }
+        }
+      } catch {
+        // ignore unreadable dir
+      }
+    }
+  }
 
   const repoQueuedHooks: Record<string, number> = {};
   if (router) {
@@ -14746,5 +15031,6 @@ export function getFleetRosterInfo(): {
     pausedRepos,
     kanbanOnlyRepos,
     repoQueuedHooks,
+    dormantRepos,
   };
 }

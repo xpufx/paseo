@@ -71,6 +71,7 @@ import {
   uppidiReposContract,
   uppidiEnrollRepoContract,
   uppidiUnenrollRepoContract,
+  uppidiAddOrchestratorContract,
   type UppidiRepo,
   type UppidiAgent,
   type UppidiIssue,
@@ -1257,9 +1258,11 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
   // Mutations
   const enrollRepoMutation = useRpcMutation(uppidiEnrollRepoContract);
   const unenrollRepoMutation = useRpcMutation(uppidiUnenrollRepoContract);
+  const addOrchestratorMutation = useRpcMutation(uppidiAddOrchestratorContract);
   const [enrollingRepoKey, setEnrollingRepoKey] = useState<string | null>(null);
   const [unenrollingRepoKey, setUnenrollingRepoKey] = useState<string | null>(null);
   const [pendingUnenrollRepoKey, setPendingUnenrollRepoKey] = useState<string | null>(null);
+  const [wakingRepoKey, setWakingRepoKey] = useState<string | null>(null);
 
   const pauseMutation = useRpcMutation(uppidiHookPauseContract);
   const resumeMutation = useRpcMutation(uppidiHookResumeContract);
@@ -1480,6 +1483,24 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
     } finally {
       setUnenrollingRepoKey(null);
       setPendingUnenrollRepoKey(null);
+    }
+  };
+
+  const handleWakeOrchestrator = async (repoKey: string) => {
+    try {
+      setWakingRepoKey(repoKey);
+      const res = await addOrchestratorMutation.mutateAsync({ repo: repoKey });
+      if (res.ok) {
+        toast.show(res.message || `Orchestrator awakened for ${repoKey}`);
+        void refetchRepos();
+        void refetchAgents();
+      } else {
+        toast.error(res.error || `Failed to wake orchestrator for ${repoKey}`);
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setWakingRepoKey(null);
     }
   };
 
@@ -2360,6 +2381,8 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
                             enrolledList.map((r) => {
                               const isUnenrolling = unenrollingRepoKey === r.key;
                               const display = formatProjectDisplay(r.key);
+                              const isWaking = wakingRepoKey === r.key;
+                              const isDormant = Boolean(r.dormant || r.isDormant);
                               return (
                                 <Card key={r.key} variant="elevated">
                                   <Row justify="space-between" align="center" wrap gap="xs">
@@ -2376,7 +2399,11 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
                                         {display.worktreePill && <Badge label={display.worktreePill} variant="neutral" size="sm" />}
                                         {r.private && <Badge label="Private" variant="neutral" size="sm" />}
                                         {r.paused && <Badge label="Paused" variant="warning" size="sm" />}
-                                        {r.hasOrchestrator && <Badge label="Orchestrator" variant="info" size="sm" />}
+                                        {isDormant ? (
+                                          <Badge label="Dormant (Standby)" variant="warning" size="sm" />
+                                        ) : r.hasOrchestrator ? (
+                                          <Badge label="Orchestrator" variant="info" size="sm" />
+                                        ) : null}
                                         {(r.queueDepth ?? 0) > 0 && (
                                           <Badge label={`${r.queueDepth} queued`} variant="info" size="sm" />
                                         )}
@@ -2393,14 +2420,26 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
                                         </Text>
                                       )}
                                     </Stack>
-                                    <Button
-                                      label={isUnenrolling ? "Unenrolling..." : "Unenroll"}
-                                      size="sm"
-                                      variant="danger"
-                                      disabled={isUnenrolling}
-                                      loading={isUnenrolling}
-                                      onPress={() => setPendingUnenrollRepoKey(r.key)}
-                                    />
+                                    <Row align="center" gap="xs">
+                                      {isDormant && (
+                                        <Button
+                                          label={isWaking ? "Waking..." : "Wake"}
+                                          size="sm"
+                                          variant="ghost"
+                                          disabled={isWaking}
+                                          loading={isWaking}
+                                          onPress={() => void handleWakeOrchestrator(r.key)}
+                                        />
+                                      )}
+                                      <Button
+                                        label={isUnenrolling ? "Unenrolling..." : "Unenroll"}
+                                        size="sm"
+                                        variant="danger"
+                                        disabled={isUnenrolling}
+                                        loading={isUnenrolling}
+                                        onPress={() => setPendingUnenrollRepoKey(r.key)}
+                                      />
+                                    </Row>
                                   </Row>
                                 </Card>
                               );

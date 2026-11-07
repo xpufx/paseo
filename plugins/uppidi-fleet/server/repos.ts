@@ -91,9 +91,11 @@ export async function handleUppidiRepos(
     }
 
     let hasOrchestrator = false;
+    let isDormant = false;
     if (router) {
       const orchRecord = router.readOrchestrator(key);
       hasOrchestrator = Boolean(orchRecord?.agentId);
+      isDormant = Boolean(orchRecord?.isDormant);
     }
 
     return {
@@ -108,6 +110,8 @@ export async function handleUppidiRepos(
       paused: isPaused,
       automationTier: isKanbanOnly ? "kanban-only" : isPaused ? "paused" : "full-active",
       hasOrchestrator,
+      isDormant,
+      dormant: isDormant,
       queueDepth,
     };
   });

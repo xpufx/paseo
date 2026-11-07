@@ -994,6 +994,7 @@ export const UppidiAgentsOutputSchema = z.object({
   enrolledRepos: z.array(z.string()).default([]),
   pausedRepos: z.array(z.string()).default([]),
   kanbanOnlyRepos: z.array(z.string()).default([]),
+  dormantRepos: z.array(z.string()).default([]),
   repoQueuedHooks: z.record(z.string(), z.number()).default({}),
   totalCount: z.number().default(0),
   runningCount: z.number().default(0),
@@ -1683,6 +1684,8 @@ export const UppidiRepoSchema = z.object({
   /** 3-tier automation posture (#1282). */
   automationTier: AutomationTierSchema.default("full-active"),
   hasOrchestrator: z.boolean().default(false).optional(),
+  isDormant: z.boolean().default(false).optional(),
+  dormant: z.boolean().default(false).optional(),
   queueDepth: z.number().default(0).optional(),
 });
 export type UppidiRepo = z.infer<typeof UppidiRepoSchema>;
@@ -2096,6 +2099,31 @@ export const SERENA_MCP_PROFILE: McpInjectionProfile = {
   enabled: true,
 };
 
+export const OrchestratorDormancySchema = z.object({
+  enabled: z.boolean().default(false),
+  idleMinutes: z.number().int().min(5).default(30),
+  quiescentOnly: z.boolean().default(true),
+});
+export type OrchestratorDormancy = z.infer<typeof OrchestratorDormancySchema>;
+
+export const OrchestratorRecordSchema = z.object({
+  key: z.string(),
+  agentId: z.string(),
+  updatedAt: z.string().nullable().optional(),
+  by: z.string().nullable().optional(),
+  missCount: z.number().optional(),
+  firstMissAt: z.string().nullable().optional(),
+  lastSeenAt: z.string().nullable().optional(),
+  stale: z.boolean().optional(),
+  staleSince: z.string().nullable().optional(),
+  staleReason: z.string().nullable().optional(),
+  closedSweeps: z.number().optional(),
+  firstClosedAt: z.string().nullable().optional(),
+  isDormant: z.boolean().default(false),
+  dormantAt: z.string().optional(),
+});
+export type OrchestratorRecord = z.infer<typeof OrchestratorRecordSchema>;
+
 export const uppidiFleetSettingsSchema = z.object({
   hookHost: z.string().default("127.0.0.1"),
   hookPort: z.number().int().min(1).max(65535).default(8099),
@@ -2181,6 +2209,14 @@ export const uppidiFleetSettingsSchema = z.object({
   }),
   tokensByHost: z.record(z.string(), z.string()).optional(),
   forgejoToken: z.string().optional(),
+  /**
+   * Dormant orchestrator idle shutdown with automatic on-demand webhook respawn (#1391).
+   */
+  orchestratorDormancy: OrchestratorDormancySchema.default({
+    enabled: false,
+    idleMinutes: 30,
+    quiescentOnly: true,
+  }),
 });
 export type UppidiFleetSettings = z.infer<typeof uppidiFleetSettingsSchema>;
 

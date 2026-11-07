@@ -584,6 +584,7 @@ declare const fleetRosterContract: RpcContract<z.ZodDefault<z.ZodOptional<z.ZodO
     pausedRepos: z.ZodDefault<z.ZodArray<z.ZodString>>;
     kanbanOnlyRepos: z.ZodDefault<z.ZodArray<z.ZodString>>;
     mutedRepos: z.ZodDefault<z.ZodArray<z.ZodString>>;
+    dormantRepos: z.ZodDefault<z.ZodArray<z.ZodString>>;
     repoQueuedHooks: z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodNumber>>;
     totalCount: z.ZodDefault<z.ZodNumber>;
     runningCount: z.ZodDefault<z.ZodNumber>;

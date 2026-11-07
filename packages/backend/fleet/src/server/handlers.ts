@@ -105,6 +105,7 @@ export function createFleetHandlers(options?: FleetHandlerOptions): FleetHandler
           kanbanOnlyRepos: [],
           mutedRepos: [],
           repoQueuedHooks: {},
+          dormantRepos: [],
           totalCount: 0,
           runningCount: 0,
           idleCount: 0,

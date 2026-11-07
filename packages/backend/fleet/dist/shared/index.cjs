@@ -277,6 +277,7 @@ var FleetOutputSchema = zod.z.object({
   pausedRepos: zod.z.array(zod.z.string()).default([]),
   kanbanOnlyRepos: zod.z.array(zod.z.string()).default([]),
   mutedRepos: zod.z.array(zod.z.string()).default([]),
+  dormantRepos: zod.z.array(zod.z.string()).default([]),
   repoQueuedHooks: zod.z.record(zod.z.string(), zod.z.number()).default({}),
   totalCount: zod.z.number().default(0),
   runningCount: zod.z.number().default(0),
